@@ -6,6 +6,7 @@ import asyncio
 import hmac
 import json
 import os
+import sys
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -167,7 +168,9 @@ def serve(runtime: Runtime, host: str = "127.0.0.1", port: int = 8780) -> None:
 
     token = harness_token()
     if token is None and host not in ("127.0.0.1", "localhost", "::1"):
-        raise SystemExit("refusing to serve the harness on a non-loopback address without BRAIN_HARNESS_TOKEN")
+        raise SystemExit("refusing to serve the harness without a token: set BRAIN_TOKEN "
+                         "(in Docker: in .env, or start with ./docker/up.sh to load it from KeePassXC)")
     web = default_web_dir()
+    print(f"harness{' and web UI' if web else ''} on http://{host}:{port}", file=sys.stderr, flush=True)
     uvicorn.run(create_app(runtime, token, web), host=host, port=port, log_level="warning",
                 server_header=False)

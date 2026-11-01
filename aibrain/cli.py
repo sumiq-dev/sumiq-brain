@@ -138,7 +138,6 @@ def main(argv: list[str] | None = None) -> int:
             runtime = runtime_for(vault, Settings.load(args.config))
             threading.Thread(target=serve_http, daemon=True, name="mcp",
                              args=(vault, args.host, args.port, os.environ.get("BRAIN_TOKEN") or None, roots)).start()
-            print(f"harness and web UI on http://{args.harness_host}:{args.harness_port}", file=sys.stderr, flush=True)
             serve(runtime, args.harness_host, args.harness_port)
 
         elif args.command in ("ask", "run"):
@@ -176,7 +175,6 @@ def main(argv: list[str] | None = None) -> int:
             runtime = runtime_for(Vault(args.vault), Settings.load(args.config))
             if args.command == "harness":
                 from .harness.server import serve
-                print(f"harness API on http://{args.host}:{args.port}", file=sys.stderr)
                 serve(runtime, args.host, args.port)
                 return 0
             return run_chat(runtime, args.message, args.recipe, args.thread, args.yes)

@@ -150,7 +150,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def serve_http(vault: Vault, host: str, port: int, token: str | None, import_roots: list[Path]) -> None:
     if token is None and not is_loopback(host):
-        raise SystemExit("refusing to serve on a non-loopback address without a token; set BRAIN_TOKEN")
+        raise SystemExit("refusing to serve the brain without a token: set BRAIN_TOKEN "
+                         "(in Docker: in .env, or start with ./docker/up.sh to load it from KeePassXC)")
     httpd = BrainHttpServer((host, port), vault, token, import_roots)
     print(f"AI Brain MCP server on http://{host}:{port}/mcp (vault: {vault.root})", file=sys.stderr, flush=True)
     try:

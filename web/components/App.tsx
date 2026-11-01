@@ -50,7 +50,9 @@ function Login({ onDone }: { onDone: () => void }) {
       >
         <h1>AI Brain</h1>
         <p>Enter the access token (BRAIN_TOKEN) to open your brain.</p>
-        <input type="password" autoComplete="current-password" autoFocus value={value} onChange={(e) => setValue(e.target.value)} placeholder="Token" />
+        {/* A fixed username lets password managers (e.g. KeePassXC-Browser) match and fill the token. */}
+        <input type="text" name="username" autoComplete="username" value="ai-brain" readOnly hidden />
+        <input type="password" name="password" autoComplete="current-password" autoFocus value={value} onChange={(e) => setValue(e.target.value)} placeholder="Token" />
         <button className="btn primary" type="submit">
           Open
         </button>

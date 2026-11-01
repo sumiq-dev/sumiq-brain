@@ -23,6 +23,20 @@ This starts one container that:
 
 Moving the brain to another machine means copying the repo's `data/` folder (or just `data/vault`).
 
+### Keep the token in KeePassXC (optional)
+
+Instead of writing `BRAIN_TOKEN` into `.env`, you can keep it in KeePassXC and start the stack with a
+script that reads it from there. The token never touches the disk.
+
+1. In KeePassXC, create an entry titled `AI Brain`. Let it generate a long random password; that's the
+   token. Set its URL to `http://localhost:3000`, so KeePassXC-Browser fills it into the login page.
+2. In `.env`, set `KEEPASS_DB=/path/to/your.kdbx` and leave `BRAIN_TOKEN` empty.
+3. Start or restart with `./docker/up.sh` instead of `docker compose up -d`. It asks for your master
+   password. `./docker/up.sh --check` only checks that the token can be read.
+
+Other compose commands (`logs`, `exec`, `ps`, `down`) work as usual. After a reboot, the container
+restarts with the token it was started with.
+
 ### Connect Claude Code (or any MCP client)
 
 ```bash
