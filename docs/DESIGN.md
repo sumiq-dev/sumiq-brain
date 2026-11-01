@@ -383,6 +383,11 @@ The harness is where you chat with agents. It's a FastAPI backend (`brain harnes
   - **Claude API:** our own loop, caching the system prompt, tools and the growing conversation, plus server-side refusal fallback.
   - **OpenAI-compatible:** our own loop.
   - **Claude subscription:** one Claude Code session per thread, resumed every turn. Built-in tools are off except web search and fetch. The toolbox is reached through a short-lived loopback MCP endpoint, so approvals work the same way.
+  - **ChatGPT subscription (Codex):** one Codex session per thread (`codex exec` / `codex exec resume`).
+    - Its shell, exec, JavaScript, browser, computer-use and sub-agent tools are disabled, and it runs in a read-only sandbox. Tested: it can neither read nor write files on its own.
+    - It reaches the toolbox through a stdio-to-HTTP bridge (`aibrain/harness/mcp_bridge.py`). Code mode stays on, because Codex calls MCP tools through it.
+    - The model list and per-model thinking levels come from `codex debug models`.
+    - Codex sends text per message rather than per token. Usage is reported as session totals, so per-turn usage is computed from the differences. The same applies to Claude Code.
 - **System prompt:** frozen per thread. It contains the brain map, the agent's capabilities, the recipe instructions and the date.
 - **Storage:** threads and items (user, assistant, tool_call, tool_result, usage) in SQLite (`~/.local/share/ai-brain/harness/harness.db`), outside the vault. Saving a conversation into the brain is phase 3.
 - **API:** threads, messages, an SSE event stream per run (replayable via `Last-Event-ID`), cancel, and approvals. It binds to 127.0.0.1 and requires `BRAIN_HARNESS_TOKEN` on any other address.

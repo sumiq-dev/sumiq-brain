@@ -157,7 +157,9 @@ export function ChatControls({
   onChange: (update: Partial<ThreadOptions>) => void;
 }) {
   if (!options) return null;
-  const efforts = providers.find((p) => p.name === options.provider)?.efforts ?? [];
+  const provider = providers.find((p) => p.name === options.provider);
+  const model = provider?.models.find((m) => m.id === options.model);
+  const efforts = model?.efforts ?? provider?.efforts ?? [];
   return (
     <div className="controls">
       <ModelPicker providers={providers} options={options} onChange={onChange} />

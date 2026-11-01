@@ -52,7 +52,7 @@ Agents get their model from `data/config/config.yaml`. Four provider kinds, mixa
 | Kind | What you pay with | How |
 | --- | --- | --- |
 | `claude_code` | Claude subscription (Pro/Max) | Official Claude Code CLI, signed in with your account |
-| `codex` | ChatGPT subscription (Plus/Pro) | Official Codex CLI, signed in with your account |
+| `codex` | ChatGPT subscription (Plus/Pro) | Official Codex CLI, signed in with your account (its own shell tools are off; it uses the same approved tools as every agent) |
 | `anthropic` | Anthropic API key | Direct API calls |
 | `openai` | OpenAI API key, or nothing for open-weight | OpenAI API or any compatible server: Ollama, vLLM, llama.cpp, LM Studio, OpenRouter |
 

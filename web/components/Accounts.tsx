@@ -176,9 +176,6 @@ export function AccountsDialog({ onClose, onChanged }: { onClose: () => void; on
                   ))}
               </div>
               {login && <LoginFlow login={login} onUpdate={(l) => setLogins((p) => ({ ...p, [a.kind]: l }))} />}
-              {a.kind === "codex" && a.signed_in && (
-                <p className="muted small">Chat with Codex models is coming next; the librarian can already use it.</p>
-              )}
             </section>
           );
         })}

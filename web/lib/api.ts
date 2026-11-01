@@ -31,7 +31,7 @@ export type ProviderInfo = {
   chat: boolean;
   available: boolean;
   reason: string | null;
-  models: { id: string; label: string }[];
+  models: { id: string; label: string; efforts?: string[] }[];
   efforts: string[];
 };
 

@@ -86,7 +86,8 @@ def create_app(runtime: Runtime, token: str | None = None, web_dir: Path | None 
         chat = runtime.settings.agents.get("chat") or runtime.settings.agents.get("default") or {}
         out = []
         for p in runtime.settings.providers.values():
-            account = runtime.accounts.status("claude") if p.kind == "claude_code" else None
+            account = runtime.accounts.status({"claude_code": "claude", "codex": "codex"}[p.kind]) \
+                if p.kind in ("claude_code", "codex") else None
             out.append(options.provider_info(p, chat.get("model") if chat.get("provider") == p.name else None,
                                              account))
         return out

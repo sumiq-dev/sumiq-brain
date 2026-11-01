@@ -1,5 +1,6 @@
 import json
 import stat
+import sys
 import threading
 import time
 
@@ -476,3 +477,89 @@ def test_cli_usage_is_per_turn():
         {"input_tokens": 10, "output_tokens": 20, "cost_usd": 0.001}, "claude-haiku-5-5")
     usage, model = ClaudeCodeChat._turn_usage(state, turn2, False)
     assert model == "claude-sonnet-5-5" and usage == {"input_tokens": 30, "output_tokens": 5, "cost_usd": 0.02}
+
+
+# --------------------------------------------------------------------------- Codex chat
+
+FAKE_CODEX_CHAT = """#!{py}
+import json, os, subprocess, sys
+args = sys.argv[1:]
+if args[:2] == ["login", "status"]:
+    sys.exit(0 if os.path.exists({signed!r}) else 1)
+json.dump(args, open({argv!r}, "w"))
+cfg = {{}}
+for i, a in enumerate(args):
+    if a == "-c":
+        k, v = args[i + 1].split("=", 1)
+        cfg[k] = v
+token = cfg["mcp_servers.harness.env"].split('"')[1]
+bridge = subprocess.Popen([json.loads(cfg["mcp_servers.harness.command"]), *json.loads(cfg["mcp_servers.harness.args"])],
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env={{**os.environ, "BRAIN_MCP_TOKEN": token}})
+bridge.stdin.write(json.dumps({{"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                 "params": {{"name": "read_index", "arguments": {{"path": "projects"}}}}}}) + "\\n")
+bridge.stdin.flush()
+result = json.loads(bridge.stdout.readline())["result"]["content"][0]["text"]
+bridge.stdin.close(); bridge.wait()
+prompt = sys.stdin.read()
+resumed = args[:2] == ["exec", "resume"]
+n = 2 if resumed else 1
+def emit(e): print(json.dumps(e), flush=True)
+if not resumed:
+    emit({{"type": "thread.started", "thread_id": "thread-123"}})
+emit({{"type": "item.completed", "item": {{"type": "agent_message", "text": "  "}}}})
+emit({{"type": "item.completed", "item": {{"type": "agent_message", "text": "Index: " + result.splitlines()[0] + " | prompt ends: " + prompt[-5:]}}}})
+emit({{"type": "turn.completed", "usage": {{"input_tokens": 100 * n, "cached_input_tokens": 60 * n, "output_tokens": 5 * n}}}})
+"""
+
+
+def fake_codex(tmp_path, signed_in=True):
+    script = tmp_path / "codex"
+    signed = tmp_path / "codex.signed-in"
+    if signed_in:
+        signed.touch()
+    script.write_text(FAKE_CODEX_CHAT.format(py=sys.executable, signed=str(signed), argv=str(tmp_path / "codex-argv.json")))
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_codex_chat_end_to_end(vault, tmp_path):
+    rt = make_runtime(vault, tmp_path, {"kind": "codex", "command": fake_codex(tmp_path)})
+    tid = rt.new_thread("standard")["id"]
+    events = finish(rt.start(tid, "hello"))
+    text = "".join(e["delta"] for e in events if e["type"] == "text")
+    assert text == "Index: [projects/index.md] | prompt ends: hello"  # empty message skipped, tool via bridge
+    assert [e["name"] for e in events if e["type"] == "tool_call"] == ["read_index"]
+    assert events[-1]["usage"] == {"input_tokens": 40, "cache_read_tokens": 60, "output_tokens": 5}
+    argv = json.loads((tmp_path / "codex-argv.json").read_text())
+    assert argv[0] == "exec" and "shell_tool" in argv and "unified_exec" in argv
+    assert 'sandbox_mode="read-only"' in argv and 'web_search="disabled"' in argv
+    assert rt.store.thread(tid)["state"]["codex_thread"] == "thread-123"
+
+    events = finish(rt.start(tid, "again"))
+    argv = json.loads((tmp_path / "codex-argv.json").read_text())
+    assert argv[:2] == ["exec", "resume"] and "thread-123" in argv
+    assert events[-1]["usage"] == {"input_tokens": 40, "cache_read_tokens": 60, "output_tokens": 5}  # per turn
+
+
+def test_codex_not_signed_in(vault, tmp_path):
+    rt = make_runtime(vault, tmp_path, {"kind": "codex", "command": fake_codex(tmp_path, signed_in=False)})
+    tid = rt.new_thread("standard")["id"]
+    events = finish(rt.start(tid, "hello"))
+    assert any(e["type"] == "error" and "not signed in" in e["message"] for e in events)
+
+
+def test_codex_in_model_picker(vault, tmp_path, monkeypatch):
+    from aibrain.harness import options
+    catalog = {"models": [
+        {"slug": "gpt-6.1-sol", "display_name": "GPT-6.1-Sol", "visibility": "list",
+         "supported_reasoning_levels": [{"effort": e} for e in ("low", "medium", "high", "xhigh", "max", "ultra")]},
+        {"slug": "hidden-model", "visibility": "hide", "supported_reasoning_levels": []}]}
+    monkeypatch.setattr(options.subprocess, "run",
+                        lambda *a, **k: type("P", (), {"stdout": json.dumps(catalog), "returncode": 0})())
+    options._codex_cache.clear()
+    from aibrain.settings import Provider
+    info = options.provider_info(Provider("chatgpt", "codex", {"command": "/bin/true"}), account={"signed_in": True})
+    assert info["chat"] and info["available"]
+    assert info["models"] == [{"id": "gpt-6.1-sol", "label": "GPT-6.1-Sol", "efforts": ["low", "medium", "high", "xhigh", "max"]}]
+    off = options.provider_info(Provider("chatgpt", "codex", {"command": "/bin/true"}), account={"signed_in": False})
+    assert not off["available"] and "not signed in" in off["reason"]

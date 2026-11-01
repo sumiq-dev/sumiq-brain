@@ -9,6 +9,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -385,4 +386,118 @@ class ClaudeCodeChat(ChatEngine):
         return None
 
 
-CHAT_ENGINES = {"anthropic": AnthropicChat, "openai": OpenAIChat, "claude_code": ClaudeCodeChat}
+# ------------------------------------------------- ChatGPT subscription (Codex CLI)
+
+# Codex's own tools that could reach the machine or spawn agents: off. Everything goes through the
+# toolbox (via MCP), so limits and approvals are the same as for every other model. Code mode stays on:
+# Codex calls MCP tools through it; without shell/exec/js it can't touch files (tested), and the
+# read-only sandbox blocks its patch tool.
+CODEX_DISABLED = ["shell_tool", "unified_exec", "js_repl", "browser_use", "computer_use", "in_app_browser",
+                  "image_generation", "multi_agent", "multi_agent_v2", "enable_fanout", "apps", "plugins",
+                  "memories"]
+
+
+def _toml(value) -> str:
+    return json.dumps(value)  # JSON strings and string arrays are valid TOML
+
+
+class CodexChat(ChatEngine):
+    """OpenAI models via the unmodified Codex CLI with your own ChatGPT subscription. One Codex session
+    per thread, resumed each turn. Its built-in shell and code tools are disabled and it runs in a
+    read-only sandbox; the toolbox is reached through a stdio bridge to the turn's MCP endpoint."""
+
+    def turn(self, state, system, user_text):
+        cli = self.spec.provider.options.get("command") or shutil.which("codex")
+        if not cli:
+            raise EngineError("'codex' CLI not found")
+        if subprocess.run([cli, "login", "status"], capture_output=True, text=True, timeout=60).returncode != 0:
+            raise EngineError("Codex is not signed in: sign in under Accounts (bottom left), "
+                              "or run `codex login --device-auth`")
+        self.workdir.mkdir(parents=True, exist_ok=True)
+        thread_id = state.get("codex_thread")
+        web = self.toolbox.recipe.web
+        mcp = RunMcpServer(self.toolbox)
+        try:
+            config = {
+                "mcp_servers.harness.command": _toml(sys.executable),
+                "mcp_servers.harness.args": _toml(["-m", "aibrain.harness.mcp_bridge", mcp.url]),
+                "mcp_servers.harness.env": "{BRAIN_MCP_TOKEN=" + _toml(mcp.token) + "}",
+                "mcp_servers.harness.tool_timeout_sec": "1200",  # approvals can take a while
+                "mcp_servers.harness.default_tools_approval_mode": _toml("approve"),
+                "sandbox_mode": _toml("read-only"),
+                "approval_policy": _toml("never"),
+                "web_search": _toml("live" if web else "disabled"),
+            }
+            if self.spec.effort:
+                config["model_reasoning_effort"] = _toml(self.spec.effort)
+            args = [a for k, v in config.items() for a in ("-c", f"{k}={v}")]
+            args += [a for f in CODEX_DISABLED for a in ("--disable", f)]
+            if self.spec.model:
+                args += ["-m", self.spec.model]
+            common = ["--json", "--skip-git-repo-check", "--ignore-user-config", *args]
+            cmd = [cli, "exec", "resume", *common, thread_id, "-"] if thread_id else [cli, "exec", *common, "-"]
+            # A resumed session already has its instructions; a new one gets them with the first message.
+            prompt = user_text if thread_id else f"{system}\n\n---\n\n{user_text}"
+            proc = subprocess.Popen(cmd, cwd=self.workdir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True, start_new_session=True)
+            threading.Thread(target=self._stop_on_cancel, args=(proc,), daemon=True).start()
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+            usage: dict = {}
+            errors: list[str] = []
+            answered = False
+            for line in proc.stdout:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                kind, item = event.get("type"), event.get("item") or {}
+                if kind == "thread.started" and event.get("thread_id"):
+                    state["codex_thread"] = event["thread_id"]
+                elif kind == "item.completed" and item.get("type") == "agent_message" and \
+                        (item.get("text") or "").strip():
+                    self.emit({"type": "text", "delta": ("\n\n" if answered else "") + item["text"].strip()})
+                    answered = True
+                elif kind == "item.started" and item.get("type") == "web_search":
+                    self.emit({"type": "tool_call", "id": item.get("id"), "name": "web_search",
+                               "args": {"query": item.get("query", "")}, "server": True})
+                elif kind == "turn.completed":
+                    usage = self._turn_usage(state, event.get("usage") or {}, resumed=bool(thread_id))
+                elif kind in ("error", "turn.failed"):
+                    err = event.get("error") or {}
+                    errors.append(str(event.get("message") or (err.get("message") if isinstance(err, dict) else err)))
+            proc.wait()
+            stderr = proc.stderr.read()
+        finally:
+            mcp.close()
+        if self.cancel.is_set():
+            return TurnResult("cancelled", usage, self.spec.model or "")
+        if not answered and (errors or proc.returncode != 0):
+            if not thread_id:
+                state.pop("codex_thread", None)
+            detail = errors[-1] if errors else stderr.strip()[-400:]
+            raise EngineError(f"Codex failed: {detail}")
+        return TurnResult("done", usage, self.spec.model or "codex default")
+
+    @staticmethod
+    def _turn_usage(state: dict, totals: dict, resumed: bool) -> dict:
+        """Codex reports token totals for the whole session; this turn's share is the difference."""
+        keys = ("input_tokens", "cached_input_tokens", "output_tokens")
+        before = state.get("codex_usage", {}) if resumed else {}
+        delta = {k: max(0, (totals.get(k) or 0) - (before.get(k) or 0)) for k in keys}
+        state["codex_usage"] = {k: totals.get(k) or 0 for k in keys}
+        usage = {"input_tokens": max(0, delta["input_tokens"] - delta["cached_input_tokens"]),
+                 "cache_read_tokens": delta["cached_input_tokens"], "output_tokens": delta["output_tokens"]}
+        return {k: v for k, v in usage.items() if v}
+
+    def _stop_on_cancel(self, proc: subprocess.Popen) -> None:
+        while proc.poll() is None:
+            if self.cancel.wait(0.5):
+                try:
+                    os.killpg(proc.pid, 15)  # also stops the native binary behind the launcher
+                except ProcessLookupError:
+                    pass
+                return
+
+
+CHAT_ENGINES = {"anthropic": AnthropicChat, "openai": OpenAIChat, "claude_code": ClaudeCodeChat, "codex": CodexChat}

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import threading
 import time
 import urllib.request
@@ -13,7 +14,7 @@ from dataclasses import replace
 from ..settings import Provider, Settings
 from .recipes import Recipe
 
-CHAT_KINDS = {"anthropic", "openai", "claude_code"}  # kinds with a streaming chat engine
+CHAT_KINDS = {"anthropic", "openai", "claude_code", "codex"}  # kinds with a chat engine
 ACCESS_MODES = ("read", "ask", "auto")
 CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 OPENAI_EFFORTS = ["low", "medium", "high"]
@@ -28,7 +29,30 @@ KIND_LABELS = {"anthropic": "Claude API", "openai": "OpenAI-compatible", "claude
                "codex": "ChatGPT subscription"}
 
 _model_cache: dict[str, tuple[float, list[str], str | None]] = {}
+_codex_cache: dict[str, tuple[float, list[dict]]] = {}
 _cache_lock = threading.Lock()
+
+
+def _codex_models(cli: str) -> list[dict]:
+    """The models this Codex account can use, from the CLI's own catalog (cached for 5 minutes)."""
+    with _cache_lock:
+        hit = _codex_cache.get(cli)
+        if hit and time.monotonic() - hit[0] < 300:
+            return hit[1]
+    models = []
+    try:
+        out = subprocess.run([cli, "debug", "models"], capture_output=True, text=True, timeout=30).stdout
+        for m in json.loads(out).get("models", []):
+            if m.get("visibility") != "list":
+                continue
+            efforts = [lvl["effort"] for lvl in m.get("supported_reasoning_levels", [])
+                       if lvl.get("effort") in CLAUDE_EFFORTS]  # "ultra" delegates to sub-agents: left out
+            models.append({"id": m["slug"], "label": m.get("display_name") or m["slug"], "efforts": efforts})
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, KeyError):
+        pass
+    with _cache_lock:
+        _codex_cache[cli] = (time.monotonic(), models)
+    return models
 
 
 class OptionsError(ValueError):
@@ -84,6 +108,15 @@ def provider_info(p: Provider, configured_model: str | None = None, account: dic
                 available, reason = False, error
         if not p.options.get("base_url"):
             efforts = OPENAI_EFFORTS  # reasoning effort on OpenAI's own reasoning models
+    elif p.kind == "codex":
+        cli = p.options.get("command") or shutil.which("codex")
+        if not cli:
+            available, reason = False, "Codex CLI not installed"
+        else:
+            if account is not None and not account.get("signed_in"):
+                available, reason = False, "not signed in: open Accounts"
+            models = _codex_models(cli)
+            efforts = sorted({e for m in models for e in m.get("efforts", [])}, key=CLAUDE_EFFORTS.index)
     if listed and p.kind != "openai":
         models = [{"id": i, "label": i} for i in listed]
     if configured_model and configured_model not in {m["id"] for m in models}:
