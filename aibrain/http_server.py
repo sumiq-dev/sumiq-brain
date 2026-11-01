@@ -71,6 +71,8 @@ class Handler(BaseHTTPRequestHandler):
     server_version = f"ai-brain/{__version__}"
 
     def log_message(self, fmt, *args):
+        if self.path == "/health":  # polled by Docker every 30s; would drown out everything else
+            return
         sys.stderr.write(f"{self.address_string()} {fmt % args}\n")
 
     def _send(self, status: int, body=None, headers: dict | None = None) -> None:

@@ -688,11 +688,48 @@ class Vault:
         doc = self.load(rel)
         if all(doc.meta.get(k) == v for k, v in fields.items()):
             return rel
-        doc.meta.update(fields)
+        for k, v in fields.items():  # None removes the field
+            if v is None:
+                doc.meta.pop(k, None)
+            else:
+                doc.meta[k] = v
         self._save(rel, doc)
         if {"summary", "title", "status"} & set(fields):
             self._after_change(rel)
         return rel
+
+    def append_log(self, name: str, record: dict) -> None:
+        """Append a JSON record to .brain/log/<name>-<YYYY-MM>.jsonl (committed with the transaction)."""
+        now = dt.datetime.now().astimezone()
+        rel = f".brain/log/{name}-{now:%Y-%m}.jsonl"
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": now.isoformat(timespec="seconds"), **record}, ensure_ascii=False) + "\n")
+        if self._tx is not None:
+            self._tx.touch(rel)
+
+    def outline(self, max_lines: int = 150) -> str:
+        """A compact map of the folder tree with summaries, for orienting an agent in one read.
+        Dated sub-folders of sources/ and conversations/ are left out; deep levels are dropped first
+        when the map would exceed max_lines."""
+        rows = []
+        for e in self.entries():
+            if PurePosixPath(e.path).name != INDEX:
+                continue
+            folder = self.parent(e.path)
+            parts = [] if folder == "." else folder.split("/")
+            if parts and parts[0] in ("sources", "conversations", INBOX) and len(parts) > 1:
+                continue
+            rows.append((parts, e))
+        order = {name: i for i, name in enumerate(self.config.top_level)}
+        rows.sort(key=lambda r: [order.get(r[0][0], 99)] + r[0][1:] if r[0] else [-1])
+        for depth in (99, 3, 2, 1):
+            lines = [f"{'  ' * len(parts)}- {'/'.join(parts) or '.'}/ — {e.summary}"
+                     for parts, e in rows if len(parts) <= depth]
+            if len(lines) <= max_lines:
+                return "\n".join(lines)
+        return "\n".join(lines[:max_lines])
 
     def sync_source_notes(self, ref: str) -> list[str]:
         """Set a source's `notes:` list to the notes that link to it, so it always shows what it fed."""

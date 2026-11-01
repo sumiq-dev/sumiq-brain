@@ -41,6 +41,8 @@ class Result:
     turns: int = 0
     tool_calls: list[str] = field(default_factory=list)
     usage: dict = field(default_factory=dict)
+    provider: str = ""
+    model: str = ""
 
 
 class EngineError(RuntimeError):
@@ -255,13 +257,17 @@ class ClaudeCodeEngine(CliEngine):
             "cache_read_tokens": u.get("cache_read_input_tokens"),
             "cache_write_tokens": u.get("cache_creation_input_tokens"),
         }.items() if v}
+        if out.get("total_cost_usd") is not None:  # what this would cost at API list price
+            usage["cost_usd"] = round(float(out["total_cost_usd"]), 4)
         if out.get("is_error") and "not logged in" in str(out.get("result", "")).lower():
             raise EngineError("Claude Code is not signed in: run `claude` and use /login (in Docker: "
                               "`docker compose exec -u brain brain claude`), or set CLAUDE_CODE_OAUTH_TOKEN")
         status = "error" if out.get("is_error") else "done"
         if out.get("subtype") == "error_max_turns":
             status = "max_turns"
-        return Result(str(out.get("result") or "").strip(), status, int(out.get("num_turns") or 0), [], usage)
+        models = ",".join(out.get("modelUsage") or {}) or self.spec.model or ""
+        return Result(str(out.get("result") or "").strip(), status, int(out.get("num_turns") or 0), [], usage,
+                      model=models)
 
 
 def _toml(value) -> str:

@@ -158,3 +158,75 @@ def test_provider_outage_uses_no_attempts(vault, librarian, monkeypatch):
     monkeypatch.setattr(lib, "run_agent", good_agent)
     assert {o.status for o in librarian.run_once()} == {"filed"}
     assert librarian.pending_sources() == [] and vault.inbox() == []
+
+
+def test_source_being_filed_elsewhere_is_skipped(vault, librarian, monkeypatch):
+    calls = []
+    monkeypatch.setattr(lib, "run_agent", lambda *a, **k: calls.append(1) or good_agent(*a, **k))
+    other = Librarian(vault, SETTINGS, log=lambda m: None)
+
+    def slow_agent(role, prompt, vault_, *a, **k):
+        # While this librarian works, a second one (the watcher) looks for pending work.
+        assert other.pending_sources() == []
+        assert other.file_source(source_name(prompt)).status == "busy"
+        return good_agent(role, prompt, vault_, *a, **k)
+    monkeypatch.setattr(lib, "run_agent", slow_agent)
+    drop(vault, "a.md", "# A\n\nHard pity at 90.")
+    [outcome] = librarian.run_once()
+    assert outcome.status == "filed"
+    assert "filing_since" not in vault.load(vault.resolve(outcome.source)).meta  # claim released
+
+
+def test_stale_claim_from_crashed_run_expires(vault, librarian, monkeypatch):
+    import datetime as dt
+    monkeypatch.setattr(lib, "run_agent", lazy_agent)
+    drop(vault, "a.md", "# A\n\none")
+    [o] = librarian.run_once()
+    old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).isoformat(timespec="seconds")
+    fresh = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    vault.set_meta(o.source, filing_since=fresh)
+    assert librarian.pending_sources() == []
+    vault.set_meta(o.source, filing_since=old)
+    assert librarian.pending_sources() == [o.source]
+
+
+def test_usage_is_logged(vault, librarian, monkeypatch):
+    def agent_with_usage(*a, **k):
+        r = good_agent(*a, **k)
+        r.turns, r.provider, r.model = 7, "p", "claude-opus-5-5"
+        r.usage = {"input_tokens": 10, "cache_read_tokens": 90_000, "output_tokens": 1500, "cost_usd": 0.12}
+        return r
+    monkeypatch.setattr(lib, "run_agent", agent_with_usage)
+    drop(vault, "a.md", "# A\n\nHard pity at 90.")
+    [o] = librarian.run_once()
+    logs = list((vault.root / ".brain" / "log").glob("usage-*.jsonl"))
+    record = __import__("json").loads(logs[0].read_text().splitlines()[-1])
+    assert record["source"] == o.source and record["turns"] == 7 and record["cost_usd"] == 0.12
+    assert any("7 turns · 90.0k in (90.0k cached) / 1.5k out · $0.12 list price" in m for m in librarian.logs)
+
+
+def test_prompt_inlines_short_documents_and_includes_map(vault, librarian, monkeypatch):
+    prompts = []
+    monkeypatch.setattr(lib, "run_agent", lambda role, prompt, *a, **k: prompts.append(prompt) or lazy_agent())
+    call(vault, "create_folder", {"path": "projects/kr", "title": "KR", "summary": "Gacha RPG."},
+         Context("agent:t"))
+    drop(vault, "short.md", "# Short\n\nHard pity at 90.")
+    librarian.run_once()
+    assert "<document>\n# Short\n\nHard pity at 90." in prompts[0]
+    assert "  - projects/kr/ — Gacha RPG." in prompts[0]
+    assert "sources/2026" not in prompts[0]  # dated source folders are noise in the map
+
+    monkeypatch.setattr(lib, "INLINE_CHARS", 10)
+    drop(vault, "long.md", "# Long\n\n" + "words " * 50)
+    librarian.run_once()
+    long_prompt = next(p for p in prompts if "long" in p.lower() and "<document>" not in p)
+    assert "read it with read_source in chunks" in long_prompt
+
+
+def test_outline_drops_deep_levels_when_too_big(vault):
+    ctx = Context("agent:t")
+    call(vault, "create_folder", {"path": "projects/a", "title": "A", "summary": "A."}, ctx)
+    call(vault, "create_folder", {"path": "projects/a/b", "title": "B", "summary": "B."}, ctx)
+    full = vault.outline()
+    assert full.splitlines()[0].startswith("- ./") and "    - projects/a/b/ — B." in full
+    assert "projects/a/b" not in vault.outline(max_lines=10)
