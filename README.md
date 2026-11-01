@@ -56,6 +56,21 @@ Subscriptions are used only through the vendors' own unmodified CLIs, which is h
 permit personal use. They are for your own use: if other people use your instance, each of them needs
 their own sign-in or API key.
 
+### Feed it documents
+
+Drop files into `data/vault/inbox/`. The librarian picks them up within seconds. It stores the
+original, extracts the text, reads it, and files what matters into the right notes. It updates
+existing notes rather than duplicating them, links people and projects, and keeps the indexes current.
+
+| Supported now | Coming later |
+| --- | --- |
+| PDF (with text), Word (.docx), PowerPoint (.pptx), Excel (.xlsx), HTML, Markdown, text, code | OCR for scans, audio/video transcripts, images |
+
+Files without extractable text are stored and listed but not read yet. Files that can't be added at
+all move to `inbox/failed/` with an `.error.txt` explaining why. If the model provider is unavailable
+(for example, not signed in yet), files are still stored, and filing resumes once it works again.
+Without Docker: `brain ingest` (once) or `brain watch` (keep going).
+
 ### Try it
 
 ```bash

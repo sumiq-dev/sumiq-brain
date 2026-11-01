@@ -13,6 +13,8 @@ from .ulid import new_ulid
 
 GITIGNORE = """\
 .brain/cache/
+inbox/*
+!inbox/index.md
 .obsidian/workspace*.json
 .trash/
 .DS_Store

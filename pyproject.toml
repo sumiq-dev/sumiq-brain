@@ -7,7 +7,7 @@ name = "ai-brain"
 version = "0.1.0"
 description = "A portable, agent-maintained second brain"
 requires-python = ">=3.11"
-dependencies = ["pyyaml>=6"]
+dependencies = ["pyyaml>=6", "pypdf>=5"]
 
 [project.optional-dependencies]
 providers = ["anthropic>=2.3", "openai>=3.40"]

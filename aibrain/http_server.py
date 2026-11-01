@@ -43,14 +43,12 @@ class BrainHttpServer(ThreadingHTTPServer):
         self.vault = vault
         self.token = token
         self.import_roots = import_roots
-        self.vault_lock = threading.RLock()
         self.sessions: OrderedDict[str, McpServer] = OrderedDict()
         self.sessions_lock = threading.Lock()
 
     def new_session(self) -> tuple[str, McpServer]:
         sid = secrets.token_urlsafe(24)
-        server = McpServer(self.vault, Context(actor="agent:remote", import_roots=self.import_roots),
-                           lock=self.vault_lock)
+        server = McpServer(self.vault, Context(actor="agent:remote", import_roots=self.import_roots))
         with self.sessions_lock:
             self.sessions[sid] = server
             while len(self.sessions) > MAX_SESSIONS:

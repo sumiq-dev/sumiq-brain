@@ -8,6 +8,8 @@ services:
     environment:
       BRAIN_TOKEN: ${BRAIN_TOKEN:?set BRAIN_TOKEN in .env}
       BRAIN_NAME: ${BRAIN_NAME:-brain}
+      BRAIN_WATCH: ${BRAIN_WATCH:-true}                    # librarian files new inbox documents automatically
+      BRAIN_WATCH_INTERVAL: ${BRAIN_WATCH_INTERVAL:-10}    # seconds between inbox checks
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       # Optional credentials; use whichever providers you configured in data/config/config.yaml.

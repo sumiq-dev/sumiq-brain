@@ -58,10 +58,11 @@ def call(vault: Vault, name: str, args: dict, ctx: Context) -> str:
     unknown = set(args) - set(t.schema["properties"])
     if unknown:
         raise VaultError(f"unknown argument(s): {', '.join(sorted(unknown))}")
-    if not t.writes:
-        return t.handler(vault, args, ctx)
-    with vault.transaction(ctx.actor, t.message(args) if t.message else name) as tx:
-        result = t.handler(vault, args, ctx)
+    with vault.lock:
+        if not t.writes:
+            return t.handler(vault, args, ctx)
+        with vault.transaction(ctx.actor, t.message(args) if t.message else name) as tx:
+            result = t.handler(vault, args, ctx)
     if tx.commit_error:
         result += f"\n(warning: saved, but the git commit failed: {tx.commit_error})"
     return result

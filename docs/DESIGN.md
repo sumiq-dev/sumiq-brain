@@ -205,7 +205,7 @@ The `sha256` is used for deduplication. The same file dropped twice is detected 
 | Component | Responsibility | Tech (proposed) |
 | --- | --- | --- |
 | Vault store | Read/write notes, parse frontmatter, resolve wikilinks, rebuild indexes, enforce conventions | Python, `python-frontmatter`, `ruamel.yaml` |
-| Extractors | File → text, no LLM: PDF/docx/pptx, OCR, audio transcripts | docling, tesseract, faster-whisper |
+| Extractors | File → text, no LLM | Own parsers for docx/pptx/xlsx/HTML (stdlib), pypdf for PDF; OCR and audio later |
 | Fallback search | Full-text search when navigation fails | ripgrep over markdown; optional SQLite FTS5 in `.brain/cache/` |
 | Tool layer | Exposes vault tools to agents and external clients | Own MCP server: stdio + Streamable HTTP with bearer auth (no SDK) |
 | Agent runtime | Runs agent loops with tools, budgets, logging | Own thin loop over the provider layer |
@@ -260,6 +260,12 @@ Triggered when files land in `inbox/` or come in through `add_source`.
 8. **Commit** the transaction and append to the log.
 
 For large sources, the librarian reads the source in chunks and maintains a running outline. It never puts the whole file in context.
+
+**Implementation (Stage 2):** code handles the steps that must be reliable, and the agent handles the steps that need judgment.
+- **Code:** inbox polling (it waits until a file's size and modification time stop changing), dedup, extraction, file moves, the source's `notes:` list (computed from backlinks), attempt counting and retries.
+- **Agent:** reading, placement, writing and linking, and the source summary.
+
+A source whose summary is still `draft` is filed again on the next run, up to 3 attempts. A provider outage (not signed in, no key, unreachable) uses up no attempts. Files are still added and extracted, filing waits, and the watcher backs off for up to 10 minutes. Files that can't be added at all are parked in `inbox/failed/` with an `.error.txt`.
 
 **Budget:** each ingestion has a token budget set per file type and size. Bulk imports run as a resumable batch with a cost estimate up front ("12,400 files, ~X M tokens, ~$Y with Haiku").
 
@@ -341,7 +347,7 @@ privacy:
   local_only_paths: ["areas/health/**", "areas/finance/**"]   # planned: never sent to cloud providers
 ```
 
-Agent roles so far: `navigator` (read-only tools, answers questions) and `worker` (all tools). Librarian and gardener roles follow in Stages 2 and 4.
+Agent roles so far: `navigator` (read-only tools, answers questions), `worker` (all tools) and `librarian` (everything except `add_source`, files new sources). The gardener follows in Stage 4.
 
 `local_only_paths` routes sensitive parts of the vault to local models only.
 

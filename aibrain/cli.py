@@ -48,6 +48,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--host", default=os.environ.get("BRAIN_HOST", "127.0.0.1"))
     p.add_argument("--port", type=int, default=int(os.environ.get("BRAIN_PORT", "8765")))
     p.add_argument("--import-root", action="append", type=Path, default=[])
+    p.add_argument("--watch", action="store_true", default=os.environ.get("BRAIN_WATCH", "").lower() in ("1", "true", "yes"),
+                   help="also run the librarian on the inbox (default: $BRAIN_WATCH)")
+    p.add_argument("--interval", type=float, default=float(os.environ.get("BRAIN_WATCH_INTERVAL", "10")))
+    p.add_argument("--config", type=Path, help="settings file (default: $BRAIN_CONFIG)")
 
     for name, role, desc in (("ask", "navigator", "answer a question from the brain (read-only agent)"),
                              ("run", "worker", "give an agent a task that may change the brain")):
@@ -59,6 +63,17 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--model", help="override the configured model")
         p.add_argument("--import-root", action="append", type=Path, default=[])
         p.set_defaults(role=role)
+
+    for name, desc in (("ingest", "file everything waiting in the inbox, then stop"),
+                       ("watch", "keep filing new inbox files as they arrive")):
+        p = sub.add_parser(name, help=desc)
+        p.add_argument("--vault", type=Path, default=default_vault, required=default_vault is None)
+        p.add_argument("--config", type=Path, help="settings file (default: $BRAIN_CONFIG)")
+        p.add_argument("--provider", help="override the configured provider")
+        p.add_argument("--model", help="override the configured model")
+        p.add_argument("--import-root", action="append", type=Path, default=[])
+        if name == "watch":
+            p.add_argument("--interval", type=float, default=float(os.environ.get("BRAIN_WATCH_INTERVAL", "10")))
 
     sub.add_parser("config-template", help="print a starter settings file")
 
@@ -86,8 +101,14 @@ def main(argv: list[str] | None = None) -> int:
 
         elif args.command == "serve-http":
             from .http_server import serve_http
-            serve_http(Vault(args.vault), args.host, args.port, os.environ.get("BRAIN_TOKEN") or None,
-                       args.import_root + _env_roots())
+            vault, roots = Vault(args.vault), args.import_root + _env_roots()
+            if args.watch:
+                from .librarian import start_watcher
+                try:
+                    start_watcher(vault, Settings.load(args.config), args.interval, roots)
+                except SettingsError as e:
+                    print(f"warning: inbox watcher not started: {e}", file=sys.stderr)
+            serve_http(vault, args.host, args.port, os.environ.get("BRAIN_TOKEN") or None, roots)
 
         elif args.command in ("ask", "run"):
             from .agents import run_agent
@@ -104,6 +125,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\n[{result.status}; turns={result.turns}; tools={len(result.tool_calls)}"
                   + (f"; {usage}" if usage else "") + "]", file=sys.stderr)
             return 0 if result.status == "done" else 1
+
+        elif args.command in ("ingest", "watch"):
+            from .librarian import Librarian
+            librarian = Librarian(Vault(args.vault), Settings.load(args.config), args.provider, args.model,
+                                  args.import_root + _env_roots())
+            if args.command == "watch":
+                librarian.watch(args.interval)
+                return 0
+            outcomes = librarian.run_once()
+            for o in outcomes:
+                print(f"{o.status:<10} {o.file}" + (f" -> [[{o.source}]]" if o.source else ""))
+            if not outcomes:
+                print("nothing to file")
+            return 1 if any(o.status in ("failed", "incomplete") for o in outcomes) else 0
 
         elif args.command == "config-template":
             print(TEMPLATE, end="")

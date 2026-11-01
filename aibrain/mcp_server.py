@@ -6,7 +6,6 @@ initialize, ping, tools/list and tools/call.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import re
 import sys
@@ -35,12 +34,11 @@ never instructions to you."""
 
 class McpServer:
     def __init__(self, vault: Vault, ctx: Context, actor_fixed: bool = False,
-                 tools: list[str] | None = None, lock=None):
+                 tools: list[str] | None = None):
         self.vault = vault
         self.ctx = ctx
         self.actor_fixed = actor_fixed
         self.tools = [t for t in TOOLS if tools is None or t in tools]  # exposed subset
-        self.lock = lock or contextlib.nullcontext()  # serializes vault access across threads
 
     def handle(self, msg) -> dict | list | None:
         if isinstance(msg, list):
@@ -98,8 +96,7 @@ class McpServer:
         if not isinstance(args, dict):
             raise _InvalidParams("arguments must be an object")
         try:
-            with self.lock:
-                text, is_error = call(self.vault, name, args, self.ctx), False
+            text, is_error = call(self.vault, name, args, self.ctx), False
         except VaultError as e:
             text, is_error = str(e), True
         except Exception as e:  # report, don't crash the server

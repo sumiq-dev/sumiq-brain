@@ -41,6 +41,7 @@ STATUSES = {"current", "outdated", "draft"}
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 RESCAN_SECONDS = 2.0
 INBOX = "inbox"
+FAILED = "failed"  # inbox/failed/: files that could not be ingested, with an .error.txt next to each
 
 
 def in_inbox(rel: str) -> bool:
@@ -182,6 +183,11 @@ class Vault:
                 paths.discard(rel)
                 if not paths:
                     del self._names[stem]
+
+    @property
+    def lock(self) -> threading.RLock:
+        """Held for every tool call, so several agents and clients can share one Vault object."""
+        return self._lock
 
     def entry(self, rel: str) -> Entry:
         e = self._entries.get(rel)
@@ -676,6 +682,27 @@ class Vault:
         self._after_change(rel)
         return rel
 
+    def set_meta(self, ref: str, **fields) -> str:
+        """Set frontmatter fields directly (for pipeline bookkeeping, not for agents)."""
+        rel = self.resolve(ref)
+        doc = self.load(rel)
+        if all(doc.meta.get(k) == v for k, v in fields.items()):
+            return rel
+        doc.meta.update(fields)
+        self._save(rel, doc)
+        if {"summary", "title", "status"} & set(fields):
+            self._after_change(rel)
+        return rel
+
+    def sync_source_notes(self, ref: str) -> list[str]:
+        """Set a source's `notes:` list to the notes that link to it, so it always shows what it fed."""
+        rel = self.resolve(ref)
+        notes = [p for p in self.backlinks(rel)
+                 if self._entries[p].meta.get("type") not in ("index", "source", "conversation")]
+        links = [self.link_for(p) for p in notes]
+        self.set_meta(rel, notes=links)
+        return links
+
     def _ensure_folder(self, rel: str, title: str, summary: str) -> None:
         if not self.abs(self.index_of(rel)).is_file():
             self.create_folder(rel, title, summary)
@@ -785,9 +812,11 @@ class Vault:
         return out
 
     def inbox(self) -> list[str]:
+        """Files waiting in the inbox (not hidden files, not ones parked in inbox/failed/)."""
         base = self.root / INBOX
         return sorted(p.relative_to(self.root).as_posix() for p in base.rglob("*")
-                      if p.is_file() and p.name != INDEX and not p.name.startswith("."))
+                      if p.is_file() and p.name != INDEX and not p.name.startswith(".")
+                      and not p.relative_to(base).as_posix().startswith(f"{FAILED}/"))
 
     def conventions(self) -> str:
         path = self.root / ".brain" / "schema.md"

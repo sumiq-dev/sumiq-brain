@@ -201,7 +201,7 @@ def test_add_source_paging_and_binary(vault, run):
     (vault.root / "inbox" / "long.txt").write_text("a" * 100)
     name = run("add_source", file="inbox/long.txt", title="Long", summary="Long text.").split("[[")[1].split("]]")[0]
     out = run("read_source", name=name, start=0, max_chars=40)
-    assert "chars 0-40 of 100; continue with start=40" in out
+    assert "chars 0-40 of 101; continue with start=40" in out
     assert "end of text" in run("read_source", name=name, start=80, max_chars=40)
     (vault.root / "inbox" / "pic.png").write_bytes(b"\x89PNG\r\n")
     assert "no text extractor" in run("add_source", file="inbox/pic.png")
