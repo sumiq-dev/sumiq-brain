@@ -1,0 +1,28 @@
+services:
+  brain:
+    build: .
+    image: ai-brain
+    restart: unless-stopped
+    ports:
+      - "${BRAIN_PORT:-8765}:8765"
+    environment:
+      BRAIN_TOKEN: ${BRAIN_TOKEN:?set BRAIN_TOKEN in .env}
+      BRAIN_NAME: ${BRAIN_NAME:-brain}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      # Optional credentials; use whichever providers you configured in data/config/config.yaml.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+    volumes:
+      - ./data/vault:/vault          # the brain itself: plain files, open it in Obsidian
+      - ./data/config:/config        # platform settings (providers, agent models)
+      - ./data/home:/home/brain      # CLI sign-ins (Claude Code, Codex) survive restarts
+
+  # Open-weight models. Start with: docker compose --profile local up -d
+  ollama:
+    image: ollama/ollama
+    profiles: ["local"]
+    restart: unless-stopped
+    volumes:
+      - ./data/ollama:/root/.ollama

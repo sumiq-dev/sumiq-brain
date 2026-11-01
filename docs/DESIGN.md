@@ -207,9 +207,9 @@ The `sha256` is used for deduplication. The same file dropped twice is detected 
 | Vault store | Read/write notes, parse frontmatter, resolve wikilinks, rebuild indexes, enforce conventions | Python, `python-frontmatter`, `ruamel.yaml` |
 | Extractors | File → text, no LLM: PDF/docx/pptx, OCR, audio transcripts | docling, tesseract, faster-whisper |
 | Fallback search | Full-text search when navigation fails | ripgrep over markdown; optional SQLite FTS5 in `.brain/cache/` |
-| Tool layer | Exposes vault tools to agents and external clients | Own MCP server (JSON-RPC over stdio, no SDK); HTTP later |
+| Tool layer | Exposes vault tools to agents and external clients | Own MCP server: stdio + Streamable HTTP with bearer auth (no SDK) |
 | Agent runtime | Runs agent loops with tools, budgets, logging | Own thin loop over the provider layer |
-| LLM provider layer | One interface, multiple backends, per-agent model choice | See §8 |
+| LLM provider layer | Engines per provider kind, per-agent model choice | See §9 |
 | Job queue | Serializes writes, retries, resumable ingestion | SQLite-backed queue stored outside the vault |
 | Versioning | Commits each agent transaction | git CLI / `pygit2` |
 
@@ -309,36 +309,39 @@ Conversation transcripts fall under the same `local_only_paths` rules when they 
 
 ## 9. LLM providers
 
-A single interface, with provider and model chosen per agent and task.
+Every agent role gets its model from the platform settings. An **engine** runs one agent task on one kind of provider. There are two families:
 
-```python
-class LLMProvider(Protocol):
-    def complete(self, messages, tools=None, max_tokens=..., **opts) -> Response: ...
-```
+- **API engines** (`anthropic`, `openai`). Our own tool-use loop calls the vendor API through the official SDK and runs brain tools in-process. `openai` also covers every OpenAI-compatible server, so open-weight models (Ollama, vLLM, llama.cpp, LM Studio) and routers like OpenRouter work through it.
+- **CLI engines** (`claude_code`, `codex`). The official, unmodified vendor CLI runs the agent loop, signed in with your own subscription, and reaches the brain through our MCP server (`brain serve --tools …`). Built-in shell/file tools are disabled (Claude Code) or sandboxed read-only in an empty folder (Codex). The only way into the vault is the brain tools.
 
-Backends: **Anthropic (Claude API)** and **OpenAI-compatible endpoints** (covers Ollama, llama.cpp server, vLLM, LM Studio). More can be added behind the same interface.
+| Kind | Billing | Notes |
+| --- | --- | --- |
+| `claude_code` | Claude Pro/Max subscription (or API key) | Sign in via `claude` /login or `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` |
+| `codex` | ChatGPT Plus/Pro subscription (or API key) | Sign in via `codex login --device-auth` |
+| `anthropic` | API key | Prompt caching on tools + system; server-side refusal fallback on models that support it |
+| `openai` | API key, or none for local servers | Chat Completions with function tools |
 
-Platform config lives outside the vault (e.g. `~/.config/ai-brain/config.yaml`):
+**Why subscriptions go through the CLIs:** Anthropic allows subscription sign-in only in its own apps. Third-party software may not take or reuse subscription credentials. Running the unmodified Claude Code binary signed in with your own plan is explicitly allowed. Codex supports ChatGPT sign-in for `codex exec`. So the platform never touches subscription tokens. It starts the vendor's CLI, and the CLI authenticates itself. Subscriptions are for personal use. If other people use an instance, each needs their own sign-in or API key. Subscription usage limits assume ordinary individual use, so bulk ingestion should use API or local providers.
+
+Platform settings live outside the vault: `$BRAIN_CONFIG`, default `~/.config/ai-brain/config.yaml`, in Docker `/config/config.yaml`. `brain config-template` prints a starter file.
 
 ```yaml
 providers:
-  claude:
-    kind: anthropic
-    api_key_env: ANTHROPIC_API_KEY
-  local:
-    kind: openai_compatible
-    base_url: http://localhost:11434/v1
+  claude-subscription: { kind: claude_code }
+  chatgpt-subscription: { kind: codex }
+  anthropic: { kind: anthropic, api_key_env: ANTHROPIC_API_KEY }
+  local: { kind: openai, base_url: http://ollama:11434/v1 }
 
 agents:
-  librarian:
-    triage:  { provider: claude, model: claude-haiku-5-5 }
-    write:   { provider: claude, model: claude-sonnet-5-5 }
-  navigator: { provider: claude, model: claude-sonnet-5-5 }
-  gardener:  { provider: local,  model: qwen3:32b }
+  default:   { provider: claude-subscription, model: opus }
+  navigator: { provider: local, model: qwen3:32b }
+  librarian: { provider: anthropic, model: claude-opus-5-5, effort: medium }
 
 privacy:
-  local_only_paths: ["areas/health/**", "areas/finance/**"]   # never sent to cloud providers
+  local_only_paths: ["areas/health/**", "areas/finance/**"]   # planned: never sent to cloud providers
 ```
+
+Agent roles so far: `navigator` (read-only tools, answers questions) and `worker` (all tools). Librarian and gardener roles follow in Stages 2 and 4.
 
 `local_only_paths` routes sensitive parts of the vault to local models only.
 
@@ -351,10 +354,11 @@ privacy:
 
 ## 11. Deployment
 
-- The service runs on a separate server/PC (not the Raspberry Pi). Bulk extraction (OCR, transcription) and local models need real CPU/GPU.
-- Shipped as a Docker image plus a plain `pip install`. The vault is a mounted volume, so moving the brain means moving the folder.
-- Clients connect over MCP (stdio for local, HTTP/SSE for remote) or the HTTP API.
-- The vault can be synced to other devices (Syncthing, git, Obsidian Sync) for reading in Obsidian. Only one service instance should write to a vault at a time.
+- **One Docker image, any host** (x86_64 or arm64): `docker compose up -d`. The image contains the brain service, git/git-LFS and, optionally (`WITH_CLIS`), the Claude Code and Codex CLIs. An optional `local` profile adds Ollama.
+- **Three mounted folders hold all state:** `data/vault` (the brain), `data/config` (platform settings) and `data/home` (CLI sign-ins). Moving the brain means moving `data/`. The container runs as an unprivileged user that matches the host user (`PUID`/`PGID`), so the files stay editable on the host and in Obsidian.
+- **Remote access:** MCP over HTTP (Streamable HTTP transport) at `/mcp`, protected by a bearer token (`BRAIN_TOKEN`). Each client session is attributed separately in the vault's history. Put it behind HTTPS before exposing it to the internet. Local clients can still use stdio (`brain serve`).
+- **Heavy work:** bulk extraction (OCR, transcription) and local models need real CPU/GPU, so for those, host the container on a capable machine.
+- **Readers elsewhere:** the vault can be synced to other devices (Syncthing, git, Obsidian Sync) for reading in Obsidian. Only one brain service should write to a vault at a time.
 
 ## 12. Roadmap
 
@@ -376,8 +380,9 @@ privacy:
 | 2026-11-01 | Vaults use git + git-LFS for source originals (§4). The code repo is unaffected. |
 | 2026-11-01 | Agent conversations can be saved into the brain and distilled into notes (§8.4). |
 | 2026-11-01 | The brain must be portable: one folder, plain files, no external state (§2). |
-| 2026-11-01 | LLM providers configurable per agent: Claude API + local (§9). |
-| 2026-11-01 | Service runs on a separate server/PC, not the Raspberry Pi (§11). |
+| 2026-11-01 | LLM providers configurable per agent: Claude and OpenAI via subscription or API, plus open-weight models (§9). |
+| 2026-11-01 | Subscriptions only through the official vendor CLIs, never by handling their tokens (§9). |
+| 2026-11-01 | The whole platform ships as one Docker image that can be hosted anywhere (§11). |
 
 ## 14. Open questions
 

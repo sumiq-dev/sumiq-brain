@@ -215,7 +215,7 @@ def _write_note(vault, args, ctx):
     rel, warnings = vault.write_note(
         args["path"], args["title"], args["summary"], args["body"], args.get("type"),
         args.get("tags"), args.get("related"), args.get("sources"), args.get("status"))
-    return _with_warnings(f"saved {rel}", warnings)
+    return _with_warnings(f"saved {rel}; folder index updated", warnings)
 
 
 @tool("edit_note",
@@ -231,7 +231,7 @@ def _write_note(vault, args, ctx):
 def _edit_note(vault, args, ctx):
     rel = vault.edit_note(args["name"], args.get("find"), args.get("replace"), args.get("append"),
                           args.get("title"), args.get("summary"), args.get("tags"), args.get("status"))
-    return f"saved {rel}"
+    return f"saved {rel}; folder index updated"
 
 
 @tool("link",

@@ -68,5 +68,5 @@ def test_cli_serve_end_to_end(vault):
                           input="".join(json.dumps(m) + "\n" for m in msgs),
                           capture_output=True, text=True, timeout=30)
     replies = [json.loads(line) for line in proc.stdout.splitlines()]
-    assert replies[1]["result"]["content"][0]["text"] == "saved topics/hello.md"
+    assert replies[1]["result"]["content"][0]["text"] == "saved topics/hello.md; folder index updated"
     assert "[[hello]] — First note." in (vault.root / "topics" / "index.md").read_text()

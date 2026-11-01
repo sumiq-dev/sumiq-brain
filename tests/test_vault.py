@@ -42,7 +42,7 @@ def test_write_note_and_index(vault, run, project):
     out = run("write_note", path="projects/kings-raid/gacha-rates", title="Gacha rates",
               summary="Pull rates and pity at 90.", body="Rates are 3% SSR.", tags=["#design"],
               related=["combat"])
-    assert "saved projects/kings-raid/gacha-rates.md" in out
+    assert "saved projects/kings-raid/gacha-rates.md; folder index updated" in out
     assert "links to notes that don't exist yet: combat" in out
     doc = vault.load("projects/kings-raid/gacha-rates.md")
     assert doc.meta["type"] == "note" and doc.meta["author"] == "agent:test"
