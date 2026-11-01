@@ -56,7 +56,7 @@ def _list_openai_models(provider: Provider) -> tuple[list[str], str | None]:
     return models, error
 
 
-def provider_info(p: Provider, configured_model: str | None = None) -> dict:
+def provider_info(p: Provider, configured_model: str | None = None, account: dict | None = None) -> dict:
     """What the model picker shows for one provider."""
     chat = p.kind in CHAT_KINDS
     available, reason = chat, None if chat else "not available in chat yet"
@@ -70,6 +70,8 @@ def provider_info(p: Provider, configured_model: str | None = None) -> dict:
             models = [{"id": a, "label": label} for a, label in CLAUDE_ALIASES.items()] + models
             if not (p.options.get("command") or shutil.which("claude")):
                 available, reason = False, "Claude Code CLI not installed"
+            elif account is not None and not account.get("signed_in"):
+                available, reason = False, "not signed in: open Accounts"
         elif not p.api_key():
             available, reason = False, f"needs {p.options.get('api_key_env') or 'an API key'}"
     elif p.kind == "openai":

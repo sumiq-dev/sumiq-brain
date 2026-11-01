@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import options
+from .accounts import AccountError
 from .runtime import Runtime
 
 
@@ -29,6 +30,10 @@ class NewMessage(BaseModel):
 
 class Decision(BaseModel):
     approved: bool
+
+
+class LoginCode(BaseModel):
+    code: str
 
 
 SECURITY_HEADERS = {
@@ -79,8 +84,43 @@ def create_app(runtime: Runtime, token: str | None = None, web_dir: Path | None 
     @app.get("/api/providers", dependencies=api)
     def providers():
         chat = runtime.settings.agents.get("chat") or runtime.settings.agents.get("default") or {}
-        return [options.provider_info(p, chat.get("model") if chat.get("provider") == p.name else None)
-                for p in runtime.settings.providers.values()]
+        out = []
+        for p in runtime.settings.providers.values():
+            account = runtime.accounts.status("claude") if p.kind == "claude_code" else None
+            out.append(options.provider_info(p, chat.get("model") if chat.get("provider") == p.name else None,
+                                             account))
+        return out
+
+    # Sign in to the subscription CLIs (their own flows; see accounts.py)
+    @app.get("/api/accounts", dependencies=api)
+    def accounts():
+        return runtime.accounts.all()
+
+    def account_call(fn, *args):
+        try:
+            return fn(*args)
+        except AccountError as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/accounts/{kind}/login", dependencies=api)
+    def start_login(kind: str):
+        return account_call(runtime.accounts.start_login, kind).public()
+
+    @app.get("/api/accounts/logins/{lid}", dependencies=api)
+    def login_state(lid: str):
+        return account_call(runtime.accounts.get, lid).public()
+
+    @app.post("/api/accounts/logins/{lid}/code", dependencies=api)
+    def login_code(lid: str, body: LoginCode):
+        return account_call(runtime.accounts.submit_code, lid, body.code).public()
+
+    @app.delete("/api/accounts/logins/{lid}", dependencies=api)
+    def cancel_login(lid: str):
+        return account_call(runtime.accounts.cancel, lid).public()
+
+    @app.post("/api/accounts/{kind}/logout", dependencies=api)
+    def logout(kind: str):
+        return account_call(runtime.accounts.logout, kind)
 
     @app.get("/api/threads", dependencies=api)
     def threads():

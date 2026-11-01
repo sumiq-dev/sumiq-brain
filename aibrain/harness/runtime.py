@@ -14,6 +14,7 @@ from ..engines import EngineError
 from ..settings import Settings, SettingsError
 from ..vault import Vault
 from . import options
+from .accounts import Accounts
 from .chat import CHAT_ENGINES, TurnResult
 from .recipes import Recipe
 from .store import Store
@@ -129,6 +130,11 @@ class Runtime:
         self.workdir = workdir
         self.searxng_url = searxng_url
         self.broker = ApprovalBroker()
+        commands = {}
+        for p in settings.providers.values():  # a configured CLI path also applies to signing in
+            if p.kind in ("claude_code", "codex") and p.options.get("command"):
+                commands["claude" if p.kind == "claude_code" else "codex"] = p.options["command"]
+        self.accounts = Accounts(commands)
         self.runs: dict[str, Run] = {}
         self._active: dict[str, str] = {}  # thread id -> running run id
         self._lock = threading.Lock()

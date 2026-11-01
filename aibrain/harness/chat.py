@@ -316,8 +316,8 @@ class ClaudeCodeChat(ChatEngine):
         if result.get("is_error") and "not logged in" in str(result.get("result", "")).lower():
             if first:
                 state.pop("session_id", None)
-            raise EngineError("Claude Code is not signed in: run `claude` and use /login (in Docker: "
-                              "`docker compose exec -u brain brain claude`)")
+            raise EngineError("Claude Code is not signed in: sign in under Accounts (bottom left), "
+                              "or run `claude` and use /login")
         usage, model = self._turn_usage(state, result, first)
         status = "error" if result.get("is_error") else "done"
         if result.get("subtype") == "error_max_turns":

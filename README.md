@@ -56,7 +56,11 @@ Agents get their model from `data/config/config.yaml`. Four provider kinds, mixa
 | `anthropic` | Anthropic API key | Direct API calls |
 | `openai` | OpenAI API key, or nothing for open-weight | OpenAI API or any compatible server: Ollama, vLLM, llama.cpp, LM Studio, OpenRouter |
 
-Sign in to a subscription once; the login is kept in `./data/home`:
+Sign in to a subscription once, in the web UI under **Accounts** (bottom left):
+- **Claude:** opens Anthropic's sign-in page; paste the code it shows back into the dialog.
+- **ChatGPT (Codex):** shows a one-time code; enter it on OpenAI's page, and the dialog notices when you're done.
+
+The CLIs keep the login in `./data/home`, and this app never stores credentials. The terminal still works too:
 
 ```bash
 docker compose exec -u brain brain claude                     # then /login

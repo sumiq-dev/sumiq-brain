@@ -70,6 +70,24 @@ export type Item = {
 
 export type RunEvent = Item & { type: string; seq: number; delta?: string; usage?: Partial<Item> };
 
+export type Account = {
+  kind: "claude" | "codex";
+  label: string;
+  installed: boolean;
+  signed_in: boolean;
+  detail: string | null;
+};
+
+export type Login = {
+  id: string;
+  kind: string;
+  status: "starting" | "waiting" | "verifying" | "done" | "failed" | "cancelled";
+  url: string | null;
+  user_code: string | null;
+  needs_code: boolean;
+  message: string;
+};
+
 export class Unauthorized extends Error {}
 
 const TOKEN_KEY = "ai-brain-token";
@@ -113,6 +131,13 @@ export const api = {
   send: (id: string, text: string) =>
     request<{ run_id: string }>(`/api/threads/${id}/messages`, { method: "POST", body: JSON.stringify({ text }) }),
   cancel: (runId: string) => request<{ cancelled: boolean }>(`/api/runs/${runId}/cancel`, { method: "POST" }),
+  accounts: () => request<Account[]>("/api/accounts"),
+  startLogin: (kind: string) => request<Login>(`/api/accounts/${kind}/login`, { method: "POST" }),
+  login: (id: string) => request<Login>(`/api/accounts/logins/${id}`),
+  loginCode: (id: string, code: string) =>
+    request<Login>(`/api/accounts/logins/${id}/code`, { method: "POST", body: JSON.stringify({ code }) }),
+  cancelLogin: (id: string) => request<Login>(`/api/accounts/logins/${id}`, { method: "DELETE" }),
+  logout: (kind: string) => request<Account>(`/api/accounts/${kind}/logout`, { method: "POST" }),
   decide: (approvalId: string, approved: boolean) =>
     request<{ ok: boolean }>(`/api/approvals/${approvalId}`, { method: "POST", body: JSON.stringify({ approved }) }),
 };

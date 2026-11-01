@@ -300,3 +300,38 @@ select.control { appearance: auto; }
   .app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
 }
+
+/* accounts */
+.sidebar-foot { padding: 10px 12px; border-top: 1px solid var(--border); }
+.btn.wide { width: 100%; }
+.btn.small { padding: 3px 10px; font-size: 13px; text-decoration: none; display: inline-block; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); display: grid; place-items: center; z-index: 50; }
+.modal {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+}
+.modal-head { display: flex; justify-content: space-between; align-items: center; }
+.modal-head h2 { margin: 0; font-size: 18px; }
+.icon-btn { border: 0; background: none; font-size: 22px; color: var(--text-soft); }
+.muted { color: var(--text-soft); }
+.small { font-size: 12.5px; }
+.ok { color: var(--ok); }
+.err { color: var(--err); }
+.account { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-top: 12px; }
+.account-head { display: flex; align-items: center; gap: 10px; }
+.account-name { flex: 1; font-weight: 550; }
+.account-name small { display: block; font-weight: 400; color: var(--text-soft); font-size: 12.5px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--border); flex: none; }
+.dot.on { background: var(--ok); }
+.steps { margin: 12px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.steps a { color: var(--accent); word-break: break-all; }
+.steps a.btn { color: var(--accent-text); }
+.user-code { font-family: var(--mono); font-size: 16px; font-weight: 600; letter-spacing: 0.06em; background: var(--bg-soft); padding: 2px 8px; border-radius: 6px; }
+.code-row { display: flex; gap: 8px; margin-top: 6px; }
+.code-row input { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; background: var(--bg); color: var(--text); font-family: var(--mono); }

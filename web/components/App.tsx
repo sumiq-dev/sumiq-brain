@@ -13,6 +13,7 @@ import {
   ThreadOptions,
   Unauthorized,
 } from "@/lib/api";
+import { AccountsDialog } from "./Accounts";
 import { ChatControls } from "./Controls";
 import { Conversation } from "./Messages";
 
@@ -100,6 +101,7 @@ export default function App() {
   const [newRecipe, setNewRecipe] = useState("standard");
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [showAccounts, setShowAccounts] = useState(false);
   const streamAbort = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
 
@@ -264,7 +266,18 @@ export default function App() {
             </div>
           ))}
         </nav>
+        <div className="sidebar-foot">
+          <button className="btn wide" onClick={() => setShowAccounts(true)}>
+            Accounts
+          </button>
+        </div>
       </aside>
+      {showAccounts && (
+        <AccountsDialog
+          onClose={() => setShowAccounts(false)}
+          onChanged={() => api.providers().then(setProviders).catch(fail)}
+        />
+      )}
 
       <main className="main">
         <header className="topbar">
