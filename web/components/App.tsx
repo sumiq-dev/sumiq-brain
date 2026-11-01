@@ -1,7 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, Item, Recipe, RunEvent, runEvents, setToken, Thread, Unauthorized } from "@/lib/api";
+import {
+  api,
+  Item,
+  ProviderInfo,
+  Recipe,
+  RunEvent,
+  runEvents,
+  setToken,
+  Thread,
+  ThreadOptions,
+  Unauthorized,
+} from "@/lib/api";
+import { ChatControls } from "./Controls";
 import { Conversation } from "./Messages";
 
 function applyEvent(items: Item[], e: RunEvent): Item[] {
@@ -18,6 +30,7 @@ function applyEvent(items: Item[], e: RunEvent): Item[] {
     case "tool_call":
     case "tool_result":
     case "error":
+    case "notice":
       next.push({ ...e, kind: e.type } as Item);
       return next;
     case "approval_request":
@@ -78,6 +91,8 @@ function ToolBadges({ recipe }: { recipe?: Recipe }) {
 export default function App() {
   const [authNeeded, setAuthNeeded] = useState(false);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [options, setOptions] = useState<ThreadOptions | null>(null);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -99,6 +114,7 @@ export default function App() {
     try {
       setRecipes(await api.recipes());
       setAuthNeeded(false);
+      api.providers().then(setProviders).catch(fail);
       await refreshThreads();
       const t = new URLSearchParams(window.location.search).get("t");
       if (t) setCurrent(t);
@@ -149,6 +165,7 @@ export default function App() {
       .thread(current)
       .then((t) => {
         setItems(t.items);
+        setOptions(t.options);
         if (t.active_run) follow(t.active_run);
       })
       .catch(fail);
@@ -165,7 +182,7 @@ export default function App() {
     try {
       let tid = current;
       if (!tid) {
-        tid = (await api.newThread(newRecipe)).id;
+        tid = (await api.newThread(newRecipe, options ?? undefined)).id;
         setItems([]);
         streamAbort.current?.abort();
         setCurrent(tid);
@@ -180,6 +197,26 @@ export default function App() {
 
   const thread = threads.find((t) => t.id === current);
   const recipe = recipes.find((r) => r.id === (thread?.recipe || newRecipe));
+
+  // A new chat starts from its recipe's defaults; an open conversation keeps its own options.
+  useEffect(() => {
+    if (current) return;
+    const r = recipes.find((x) => x.id === newRecipe);
+    if (r) setOptions(r.defaults);
+  }, [current, newRecipe, recipes]);
+
+  const changeOptions = async (update: Partial<ThreadOptions>) => {
+    if (!options) return;
+    if (!current) {
+      setOptions({ ...options, ...update, ...(update.provider ? { effort: update.effort ?? null } : {}) });
+      return;
+    }
+    try {
+      setOptions((await api.setOptions(current, update)).options);
+    } catch (e) {
+      fail(e);
+    }
+  };
 
   if (authNeeded) return <Login onDone={load} />;
 
@@ -262,6 +299,7 @@ export default function App() {
         )}
 
         <footer className="composer">
+          <div className="composer-box">
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -274,6 +312,8 @@ export default function App() {
             placeholder={runId ? "Answering…" : "Message (Enter to send, Shift+Enter for a new line)"}
             rows={Math.min(8, Math.max(2, draft.split("\n").length))}
           />
+          <ChatControls providers={providers} options={options} recipe={recipe} onChange={changeOptions} />
+          </div>
           {runId ? (
             <button className="btn" onClick={() => api.cancel(runId).catch(fail)}>
               Stop

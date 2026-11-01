@@ -227,17 +227,63 @@ button:disabled { cursor: default; opacity: 0.55; }
   align-items: flex-end;
   padding: 12px max(24px, calc((100% - 820px) / 2)) 20px;
 }
-.composer textarea {
+.composer-box {
   flex: 1;
-  resize: none;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 10px 12px;
-  font: inherit;
   background: var(--bg);
+}
+.composer-box:focus-within { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+.composer textarea {
+  width: 100%;
+  resize: none;
+  border: 0;
+  border-radius: 12px 12px 0 0;
+  padding: 10px 12px 4px;
+  font: inherit;
+  background: transparent;
   color: var(--text);
 }
-.composer textarea:focus, .new-chat select:focus, .login input:focus {
+.composer textarea:focus { outline: none; }
+
+/* model / thinking / access controls under the message box */
+.controls { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 8px 8px; align-items: center; }
+.control {
+  font-size: 12.5px;
+  border: 1px solid transparent;
+  background: var(--bg-soft);
+  color: var(--text-soft);
+  border-radius: 7px;
+  padding: 4px 8px;
+  max-width: 280px;
+}
+.control:hover { border-color: var(--border); color: var(--text); }
+select.control { appearance: auto; }
+.access { position: relative; }
+.access-button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.access-button.read { color: var(--ok); }
+.access-button.auto { color: var(--warn); background: var(--warn-soft); }
+.access-panel {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  width: 320px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 8px;
+}
+.panel-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-soft); padding: 6px 6px 2px; }
+.panel-row { display: flex; gap: 8px; align-items: flex-start; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 13.5px; }
+.panel-row:hover { background: var(--bg-soft); }
+.panel-row.disabled { opacity: 0.55; cursor: default; }
+.panel-row small { display: block; color: var(--text-soft); font-size: 12px; }
+.panel-row input { margin-top: 3px; }
+.notice { align-self: center; font-size: 12px; color: var(--text-soft); background: var(--bg-soft); border-radius: 99px; padding: 3px 12px; }
+.new-chat select:focus, .login input:focus {
   outline: 2px solid var(--accent-soft);
   border-color: var(--accent);
 }

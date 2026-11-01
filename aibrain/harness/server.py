@@ -14,11 +14,13 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import options
 from .runtime import Runtime
 
 
 class NewThread(BaseModel):
     recipe: str = "standard"
+    options: dict | None = None
 
 
 class NewMessage(BaseModel):
@@ -72,7 +74,13 @@ def create_app(runtime: Runtime, token: str | None = None, web_dir: Path | None 
 
     @app.get("/api/recipes", dependencies=api)
     def recipes():
-        return [r.summary() for r in runtime.recipes.values()]
+        return [{**r.summary(), "defaults": options.defaults(r, runtime.settings)} for r in runtime.recipes.values()]
+
+    @app.get("/api/providers", dependencies=api)
+    def providers():
+        chat = runtime.settings.agents.get("chat") or runtime.settings.agents.get("default") or {}
+        return [options.provider_info(p, chat.get("model") if chat.get("provider") == p.name else None)
+                for p in runtime.settings.providers.values()]
 
     @app.get("/api/threads", dependencies=api)
     def threads():
@@ -81,10 +89,12 @@ def create_app(runtime: Runtime, token: str | None = None, web_dir: Path | None 
     @app.post("/api/threads", dependencies=api)
     def new_thread(body: NewThread):
         try:
-            t = runtime.new_thread(body.recipe)
+            t = runtime.new_thread(body.recipe, body.options)
         except KeyError as e:
             raise HTTPException(404, str(e))
-        return {k: v for k, v in t.items() if k != "state"}
+        except options.OptionsError as e:
+            raise HTTPException(400, str(e))
+        return {**{k: v for k, v in t.items() if k != "state"}, "options": runtime.thread_options(t)}
 
     @app.get("/api/threads/{tid}", dependencies=api)
     def thread(tid: str):
@@ -92,8 +102,21 @@ def create_app(runtime: Runtime, token: str | None = None, web_dir: Path | None 
         if t is None:
             raise HTTPException(404, "unknown thread")
         active = runtime._active.get(tid)
+        try:
+            opts = runtime.thread_options(t)
+        except KeyError:  # the thread's recipe was deleted
+            opts = None
         return {**{k: v for k, v in t.items() if k != "state"}, "items": runtime.store.items(tid),
-                "active_run": active}
+                "active_run": active, "options": opts}
+
+    @app.patch("/api/threads/{tid}", dependencies=api)
+    def update_thread(tid: str, body: dict):
+        try:
+            return {"options": runtime.set_options(tid, body.get("options") or {})}
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+        except options.OptionsError as e:
+            raise HTTPException(400, str(e))
 
     @app.delete("/api/threads/{tid}", dependencies=api)
     def delete_thread(tid: str):

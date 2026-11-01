@@ -174,6 +174,12 @@ export function Conversation({
             );
           case "usage":
             return <UsageLine key={n} item={item} />;
+          case "notice":
+            return (
+              <div key={n} className="notice">
+                {item.text}
+              </div>
+            );
           default:
             return null;
         }

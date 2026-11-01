@@ -317,7 +317,7 @@ def emit(e): print(json.dumps(e), flush=True)
 emit({{"type": "stream_event", "event": {{"type": "content_block_delta", "delta": {{"type": "text_delta", "text": "Projects index has " + str(len(out)) + " chars. You said: " + prompt}}}}}})
 emit({{"type": "result", "subtype": "success", "is_error": False, "result": "ok", "session_id": "s",
       "usage": {{"input_tokens": 3, "output_tokens": 4}}, "total_cost_usd": 0.01,
-      "modelUsage": {{"claude-sonnet-5-5": {{"outputTokens": 4}}}}}})
+      "modelUsage": {{"claude-sonnet-5-5": {{"inputTokens": 3, "outputTokens": 4, "costUSD": 0.01}}}}}})
 """)
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
     rt = make_runtime(vault, tmp_path, {"kind": "claude_code", "command": str(script)})
@@ -371,3 +371,108 @@ def test_package_includes_subpackages():
     root = Path(__file__).resolve().parents[1]
     cfg = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["setuptools"]["packages"]["find"]
     assert "aibrain.harness" in find_packages(str(root), include=cfg["include"])
+
+
+# --------------------------------------------------------------------------- chat options
+
+def two_provider_runtime(vault, tmp_path, monkeypatch, api_a, api_b, recipes=None):
+    monkeypatch.setenv("K", "sk")
+    settings = Settings.parse({
+        "providers": {"a": {"kind": "anthropic", "api_key_env": "K", "base_url": api_a},
+                      "b": {"kind": "openai", "base_url": api_b, "models": ["qwen3"]}},
+        "agents": {"default": {"provider": "a", "model": "claude-sonnet-5-5"}}})
+    return Runtime(vault, settings, recipes or {"standard": Recipe("standard", "Standard", web=False)},
+                   Store(tmp_path / "h.db"), tmp_path / "harness")
+
+
+def openai_sse(text):
+    chunk = {"id": "c", "object": "chat.completion.chunk", "created": 0, "model": "qwen3",
+             "choices": [{"index": 0, "delta": {"role": "assistant", "content": text}, "finish_reason": "stop"}]}
+    return f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n"
+
+
+def test_switch_provider_mid_conversation(vault, tmp_path, monkeypatch):
+    a = SseApi(anthropic_sse([([{"type": "text", "text": "Pity is 90."}], "end_turn")]))
+    b = SseApi([openai_sse("As I said, 90.")])
+    try:
+        rt = two_provider_runtime(vault, tmp_path, monkeypatch, a.url, b.url + "/v1")
+        tid = rt.new_thread("standard")["id"]
+        finish(rt.start(tid, "What is the hard pity?"))
+        assert rt.set_options(tid, {"provider": "b", "model": "qwen3"})["model"] == "qwen3"
+        events = finish(rt.start(tid, "Repeat that."))
+    finally:
+        a.close()
+        b.close()
+    assert any(e["type"] == "notice" and "Switched to b" in e["text"] for e in events)
+    sent = b.requests[0]["messages"][-1]["content"]
+    assert "User: What is the hard pity?" in sent and "Assistant: Pity is 90." in sent and sent.endswith("Repeat that.")
+    kinds = [i["kind"] for i in rt.store.items(tid)]
+    assert kinds.count("notice") == 1 and kinds.index("notice") < len(kinds) - 2  # stored before the new message
+
+
+def test_effort_and_access_change(vault, tmp_path, monkeypatch):
+    a = SseApi(anthropic_sse([([{"type": "text", "text": "ok"}], "end_turn")] * 2))
+    try:
+        rt = two_provider_runtime(vault, tmp_path, monkeypatch, a.url, "http://127.0.0.1:9/v1")
+        tid = rt.new_thread("standard", {"effort": "high"})["id"]
+        finish(rt.start(tid, "one"))
+        rt.set_options(tid, {"access": "read", "web": True})
+        events = finish(rt.start(tid, "two"))
+    finally:
+        a.close()
+    first, second = a.requests
+    assert first["output_config"] == {"effort": "high"}
+    assert "write_note" in {t.get("name") for t in first["tools"]}
+    assert "write_note" not in {t.get("name") for t in second["tools"]}       # read-only now
+    assert any(t.get("type", "").startswith("web_search") for t in second["tools"])  # web switched on
+    assert second["messages"][-1]["content"].startswith("[Note from the app: access for this conversation changed.")
+    assert any(e["type"] == "notice" for e in events)
+
+
+def test_option_validation(vault, tmp_path, monkeypatch):
+    rt = two_provider_runtime(vault, tmp_path, monkeypatch, "http://x", "http://y/v1")
+    tid = rt.new_thread("standard")["id"]
+    from aibrain.harness.options import OptionsError
+    for bad in ({"provider": "nope"}, {"access": "root"}, {"files": True}, {"effort": "ultra"}, {"color": "red"}):
+        with pytest.raises(OptionsError):
+            rt.set_options(tid, bad)
+    opts = rt.thread_options(rt.store.thread(tid))
+    assert opts == {"provider": "a", "model": "claude-sonnet-5-5", "effort": None, "web": False,
+                    "files": False, "shell": False, "access": "ask"}
+    assert rt.set_options(tid, {"provider": "b"})["model"] is None  # the old provider's model doesn't carry over
+
+
+def test_full_auto_skips_approvals(vault, tmp_path):
+    rec = recipe(tmp_path)
+    broker = ApprovalBroker()
+    tb = Toolbox(vault, rec, "agent:t", lambda e: None, broker, auto_approve=True)
+    assert not tb.call("fs_write", {"path": "x.txt", "content": "hi"})[1]
+    assert not tb.call("run_command", {"command": "echo hi"})[1]
+    ro = Toolbox(vault, rec, "agent:t", lambda e: None, broker, read_only=True)
+    assert not {"fs_write", "fs_edit", "run_command", "write_note", "edit_note"} & set(ro.tools)
+    assert {"fs_read", "read_note"} <= set(ro.tools)
+
+
+def test_providers_endpoint(vault, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from aibrain.harness.server import create_app
+    rt = two_provider_runtime(vault, tmp_path, monkeypatch, "http://x", "http://y/v1")
+    monkeypatch.delenv("K")
+    client = TestClient(create_app(rt))
+    providers = {p["name"]: p for p in client.get("/api/providers").json()}
+    assert providers["a"]["available"] is False and "needs K" in providers["a"]["reason"]
+    assert providers["a"]["efforts"][-1] == "max" and providers["b"]["efforts"] == []
+    assert [m["id"] for m in providers["b"]["models"]] == ["qwen3"]
+    assert client.get("/api/recipes").json()[0]["defaults"]["access"] == "ask"
+
+
+def test_cli_usage_is_per_turn():
+    from aibrain.harness.chat import ClaudeCodeChat
+    state = {}
+    turn1 = {"modelUsage": {"claude-haiku-5-5": {"inputTokens": 10, "outputTokens": 20, "costUSD": 0.001}}}
+    turn2 = {"modelUsage": {"claude-haiku-5-5": {"inputTokens": 10, "outputTokens": 20, "costUSD": 0.001},
+                            "claude-sonnet-5-5": {"inputTokens": 30, "outputTokens": 5, "costUSD": 0.02}}}
+    assert ClaudeCodeChat._turn_usage(state, turn1, True) == (
+        {"input_tokens": 10, "output_tokens": 20, "cost_usd": 0.001}, "claude-haiku-5-5")
+    usage, model = ClaudeCodeChat._turn_usage(state, turn2, False)
+    assert model == "claude-sonnet-5-5" and usage == {"input_tokens": 30, "output_tokens": 5, "cost_usd": 0.02}

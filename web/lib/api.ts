@@ -9,6 +9,30 @@ export type Recipe = {
   model: string | null;
   tools: { brain: boolean; files: boolean; shell: boolean; web: boolean };
   workspaces: string[];
+  defaults: ThreadOptions;
+};
+
+export type Access = "read" | "ask" | "auto";
+
+export type ThreadOptions = {
+  provider: string;
+  model: string | null;
+  effort: string | null;
+  web: boolean;
+  files: boolean;
+  shell: boolean;
+  access: Access;
+};
+
+export type ProviderInfo = {
+  name: string;
+  kind: string;
+  label: string;
+  chat: boolean;
+  available: boolean;
+  reason: string | null;
+  models: { id: string; label: string }[];
+  efforts: string[];
 };
 
 export type Thread = {
@@ -21,7 +45,7 @@ export type Thread = {
 };
 
 export type Item = {
-  kind: "user" | "assistant" | "tool_call" | "tool_result" | "error" | "usage" | "approval";
+  kind: "user" | "assistant" | "tool_call" | "tool_result" | "error" | "usage" | "approval" | "notice";
   text?: string;
   id?: string;
   name?: string;
@@ -74,10 +98,17 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   recipes: () => request<Recipe[]>("/api/recipes"),
+  providers: () => request<ProviderInfo[]>("/api/providers"),
   threads: () => request<Thread[]>("/api/threads"),
-  thread: (id: string) => request<Thread & { items: Item[]; active_run: string | null }>(`/api/threads/${id}`),
-  newThread: (recipe: string) =>
-    request<Thread>("/api/threads", { method: "POST", body: JSON.stringify({ recipe }) }),
+  thread: (id: string) =>
+    request<Thread & { items: Item[]; active_run: string | null; options: ThreadOptions | null }>(`/api/threads/${id}`),
+  newThread: (recipe: string, options?: Partial<ThreadOptions>) =>
+    request<Thread & { options: ThreadOptions }>("/api/threads", {
+      method: "POST",
+      body: JSON.stringify({ recipe, options }),
+    }),
+  setOptions: (id: string, options: Partial<ThreadOptions>) =>
+    request<{ options: ThreadOptions }>(`/api/threads/${id}`, { method: "PATCH", body: JSON.stringify({ options }) }),
   deleteThread: (id: string) => request<{ ok: boolean }>(`/api/threads/${id}`, { method: "DELETE" }),
   send: (id: string, text: string) =>
     request<{ run_id: string }>(`/api/threads/${id}/messages`, { method: "POST", body: JSON.stringify({ text }) }),

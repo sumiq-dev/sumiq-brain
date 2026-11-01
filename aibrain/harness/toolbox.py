@@ -108,7 +108,7 @@ class ApprovalBroker:
 class Toolbox:
     def __init__(self, vault: Vault, recipe: Recipe, actor: str, emit: Emit, broker: ApprovalBroker,
                  run_id: str = "", cancel: threading.Event | None = None, searxng_url: str | None = None,
-                 import_roots: list[Path] | None = None):
+                 import_roots: list[Path] | None = None, read_only: bool = False, auto_approve: bool = False):
         self.vault = vault
         self.recipe = recipe
         self.emit = emit
@@ -116,13 +116,19 @@ class Toolbox:
         self.run_id = run_id
         self.cancel = cancel
         self.searxng_url = searxng_url
+        self.read_only = read_only        # no tool that changes anything (brain, files, shell)
+        self.auto_approve = auto_approve  # "full auto": nothing waits for the user
         self.ctx = brain_tools.Context(actor=actor, import_roots=list(import_roots or []) + recipe.workspaces)
         self.tools: dict[str, Tool] = {}
         for t in brain_tools.TOOLS.values():
-            self.tools[t.name] = Tool(t.name, t.description, t.schema, self._brain_handler(t.name))
+            if not (read_only and t.writes):
+                self.tools[t.name] = Tool(t.name, t.description, t.schema, self._brain_handler(t.name))
         if recipe.files:
             self._add_file_tools()
-        if recipe.shell:
+            if read_only:
+                self.tools.pop("fs_write", None)
+                self.tools.pop("fs_edit", None)
+        if recipe.shell and not read_only:
             self._add_shell_tool()
         if recipe.web:
             self._add_web_tools()
@@ -139,7 +145,7 @@ class Toolbox:
         try:
             if tool is None:
                 raise ToolError(f"tool '{name}' is not available to this agent")
-            reason = tool.approval(args) if tool.approval else None
+            reason = tool.approval(args) if tool.approval and not self.auto_approve else None
             if reason and not self.broker.request(self.run_id, name, args, reason, self.emit, self.cancel):
                 raise ToolError("the user denied this action")
             text, is_error = _clip(tool.handler(args)), False

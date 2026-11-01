@@ -155,6 +155,8 @@ class OpenAIChat(ChatEngine):
                 kwargs["stream_options"] = {"include_usage": True}  # not every compatible server knows it
             if extra:
                 kwargs["extra_body"] = extra
+            if self.spec.effort and not opts.get("base_url"):  # OpenAI reasoning models: low/medium/high
+                kwargs["reasoning_effort"] = {"xhigh": "high", "max": "high"}.get(self.spec.effort, self.spec.effort)
             text, calls, finish = [], {}, None
             try:
                 for chunk in client.chat.completions.create(**kwargs):
@@ -285,6 +287,8 @@ class ClaudeCodeChat(ChatEngine):
             cmd += ["--session-id", session] if first else ["--resume", session]
             if self.spec.model:
                 cmd += ["--model", self.spec.model]
+            if self.spec.effort:
+                cmd += ["--effort", self.spec.effort]
             env = {**os.environ, "MCP_TOOL_TIMEOUT": "1000000"}  # approvals can take a while
             proc = subprocess.Popen(cmd, cwd=self.workdir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, text=True, env=env)
@@ -314,21 +318,38 @@ class ClaudeCodeChat(ChatEngine):
                 state.pop("session_id", None)
             raise EngineError("Claude Code is not signed in: run `claude` and use /login (in Docker: "
                               "`docker compose exec -u brain brain claude`)")
-        u = result.get("usage") or {}
-        usage = {k: v for k, v in {"input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens"),
-                                   "cache_read_tokens": u.get("cache_read_input_tokens"),
-                                   "cache_write_tokens": u.get("cache_creation_input_tokens")}.items() if v}
-        if result.get("total_cost_usd") is not None:
-            usage["cost_usd"] = round(float(result["total_cost_usd"]), 4)
-        # Claude Code also uses a small model for background chores; report the one that did the work.
-        per_model = result.get("modelUsage") or {}
-        model = max(per_model, key=lambda m: per_model[m].get("outputTokens", 0)) if per_model else ""
+        usage, model = self._turn_usage(state, result, first)
         status = "error" if result.get("is_error") else "done"
         if result.get("subtype") == "error_max_turns":
             status = "max_turns"
         if status == "error":
             self.emit({"type": "error", "message": str(result.get("result") or "the CLI reported an error")})
         return TurnResult(status, usage, model or self.spec.model or "")
+
+    @staticmethod
+    def _turn_usage(state: dict, result: dict, first: bool) -> tuple[dict, str]:
+        """Usage of this turn only. The CLI reports per-model totals for the whole session, so take the
+        difference to the previous turn's totals (kept in the thread state)."""
+        fields = {"inputTokens": "input_tokens", "outputTokens": "output_tokens",
+                  "cacheReadInputTokens": "cache_read_tokens", "cacheCreationInputTokens": "cache_write_tokens",
+                  "costUSD": "cost_usd"}
+        current = result.get("modelUsage") or {}
+        previous = {} if first else state.get("cli_model_usage", {})
+        usage: dict = {}
+        cost_by_model: dict[str, float] = {}
+        for name, totals in current.items():
+            before = previous.get(name, {})
+            for src, dst in fields.items():
+                delta = max(0, (totals.get(src) or 0) - (before.get(src) or 0))
+                if delta:
+                    usage[dst] = usage.get(dst, 0) + delta
+            cost_by_model[name] = max(0.0, (totals.get("costUSD") or 0) - (before.get("costUSD") or 0))
+        state["cli_model_usage"] = current
+        if "cost_usd" in usage:
+            usage["cost_usd"] = round(usage["cost_usd"], 4)
+        # Claude Code also uses a small model for background chores; report the one that did the work.
+        model = max(cost_by_model, key=cost_by_model.get) if cost_by_model else ""
+        return usage, model
 
     def _kill_on_cancel(self, proc: subprocess.Popen) -> None:
         while proc.poll() is None:

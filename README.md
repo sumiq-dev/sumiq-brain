@@ -120,6 +120,14 @@ brain harness                                                 # HTTP API for the
 brain recipe-example > ~/.config/ai-brain/recipes/coder.yaml  # create a recipe
 ```
 
+In the web UI, the controls under the message box change the current conversation:
+- **Model:** any configured provider and model. Providers you can't use right now are greyed out with the reason.
+- **Thinking:** the model's effort level.
+- **Access:** *Read only*, *Ask before changes* or *Full auto*, plus Web, Files and Shell toggles.
+
+Switching models within a provider keeps the conversation. Switching providers passes the earlier
+messages to the new model as context.
+
 A recipe is a saved setup: instructions, model, which tools (files/shell/web), which project folders.
 File tools can't leave the recipe's folders or read secrets. Writes and shell commands need your
 approval, except commands you put on the recipe's allowlist. Shell commands run as your user, so
