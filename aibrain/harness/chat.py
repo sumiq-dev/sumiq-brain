@@ -312,7 +312,8 @@ class ClaudeCodeChat(ChatEngine):
         if result.get("is_error") and "not logged in" in str(result.get("result", "")).lower():
             if first:
                 state.pop("session_id", None)
-            raise EngineError("Claude Code is not signed in: run `claude` and use /login")
+            raise EngineError("Claude Code is not signed in: run `claude` and use /login (in Docker: "
+                              "`docker compose exec -u brain brain claude`)")
         u = result.get("usage") or {}
         usage = {k: v for k, v in {"input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens"),
                                    "cache_read_tokens": u.get("cache_read_input_tokens"),

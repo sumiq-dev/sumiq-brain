@@ -364,6 +364,7 @@ Agent roles so far: `navigator` (read-only tools, answers questions), `worker` (
 - **Three mounted folders hold all state:** `data/vault` (the brain), `data/config` (platform settings) and `data/home` (CLI sign-ins). Moving the brain means moving `data/`. The container runs as an unprivileged user that matches the host user (`PUID`/`PGID`), so the files stay editable on the host and in Obsidian.
 - **Remote access:** MCP over HTTP (Streamable HTTP transport) at `/mcp`, protected by a bearer token (`BRAIN_TOKEN`). Each client session is attributed separately in the vault's history. Put it behind HTTPS before exposing it to the internet. Local clients can still use stdio (`brain serve`).
 - **Heavy work:** bulk extraction (OCR, transcription) and local models need real CPU/GPU, so for those, host the container on a capable machine.
+- **Web UI:** a Next.js static export, built in the image and served by the harness (no Node server at runtime), at `127.0.0.1:3000` on the host. Node.js 24 is copied in only for the CLIs, and npm and pip are removed from the runtime image. The container drops all capabilities except those needed to align UID/GID at start, and sets `no-new-privileges`.
 - **Readers elsewhere:** the vault can be synced to other devices (Syncthing, git, Obsidian Sync) for reading in Obsidian. Only one brain service should write to a vault at a time.
 
 ## 12. Harness

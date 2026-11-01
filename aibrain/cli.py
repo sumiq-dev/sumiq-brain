@@ -52,6 +52,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="also run the librarian on the inbox (default: $BRAIN_WATCH)")
     p.add_argument("--interval", type=float, default=float(os.environ.get("BRAIN_WATCH_INTERVAL", "10")))
     p.add_argument("--config", type=Path, help="settings file (default: $BRAIN_CONFIG)")
+    p.add_argument("--harness", action="store_true", default=os.environ.get("BRAIN_HARNESS", "").lower() in ("1", "true", "yes"),
+                   help="also serve the harness API and web UI (default: $BRAIN_HARNESS)")
+    p.add_argument("--harness-host", default=os.environ.get("BRAIN_HARNESS_HOST", "127.0.0.1"))
+    p.add_argument("--harness-port", type=int, default=int(os.environ.get("BRAIN_HARNESS_PORT", "8780")))
 
     for name, role, desc in (("ask", "navigator", "answer a question from the brain (read-only agent)"),
                              ("run", "worker", "give an agent a task that may change the brain")):
@@ -124,7 +128,18 @@ def main(argv: list[str] | None = None) -> int:
                     start_watcher(vault, Settings.load(args.config), args.interval, roots)
                 except SettingsError as e:
                     print(f"warning: inbox watcher not started: {e}", file=sys.stderr)
-            serve_http(vault, args.host, args.port, os.environ.get("BRAIN_TOKEN") or None, roots)
+            if not args.harness:
+                serve_http(vault, args.host, args.port, os.environ.get("BRAIN_TOKEN") or None, roots)
+                return 0
+            # One process, one Vault object: the MCP server runs in a thread, the harness in front.
+            import threading
+            from .harness.cli import runtime_for
+            from .harness.server import serve
+            runtime = runtime_for(vault, Settings.load(args.config))
+            threading.Thread(target=serve_http, daemon=True, name="mcp",
+                             args=(vault, args.host, args.port, os.environ.get("BRAIN_TOKEN") or None, roots)).start()
+            print(f"harness and web UI on http://{args.harness_host}:{args.harness_port}", file=sys.stderr, flush=True)
+            serve(runtime, args.harness_host, args.harness_port)
 
         elif args.command in ("ask", "run"):
             from .agents import run_agent

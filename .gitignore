@@ -12,6 +12,7 @@
 !/docker/
 !/docs/
 !/tests/
+!/web/
 
 # Inside allowed folders
 __pycache__/

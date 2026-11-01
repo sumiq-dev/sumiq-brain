@@ -153,7 +153,7 @@ class Runtime:
         recipe = self.recipes[thread["recipe"]]
         state = thread["state"]
         result = TurnResult("error")
-        run.emit({"type": "run_started", "run_id": run.id, "thread_id": thread["id"]})
+        run.emit({"type": "run_started", "run_id": run.id, "thread_id": thread["id"], "text": text})
         try:
             spec = self.settings.agent("chat", recipe.provider, recipe.model)
             if recipe.effort:

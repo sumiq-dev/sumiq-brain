@@ -18,7 +18,8 @@ docker compose up -d
 This starts one container that:
 - creates the brain in `./data/vault` on first start (plain files: open it in Obsidian, back it up, move it),
 - writes default settings to `./data/config/config.yaml`,
-- serves the brain over MCP at `http://<host>:8765/mcp` (bearer token required).
+- serves the brain over MCP at `http://<host>:8765/mcp` (bearer token required),
+- serves the **web UI** at `http://localhost:3000`. It's only reachable from the machine itself, and you log in with `BRAIN_TOKEN`.
 
 Moving the brain to another machine means copying the repo's `data/` folder (or just `data/vault`).
 
@@ -80,6 +81,17 @@ docker compose exec -u brain brain brain run "File everything in the inbox" --pr
 
 `ask` uses a read-only agent; `run` uses an agent that may change the brain. `--provider` and `--model`
 override the settings for one call.
+
+## Security
+
+- **Access:** every endpoint except `/health` needs the token. The web UI port is bound to localhost only.
+- **Container privileges:** the container starts as root just long enough to match your host user, then runs unprivileged. All Linux capabilities except those few are dropped, and `no-new-privileges` is set.
+- **Agents:** they can't leave their recipe's folders with file tools, can't fetch local or private network addresses, and need your approval for writes and commands. Shell commands still run as the container user, so review them before approving.
+- **What's in the image:** no npm and no pip, only the Node 24 runtime the CLIs need.
+- **CVE checks:** Trivy for the image, `pip-audit` and `npm audit` for dependencies. At the last scan there were no known high or critical vulnerabilities with an available fix; the remaining findings are Debian base packages with no fix published yet. Re-check with:
+  ```bash
+  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image --severity HIGH,CRITICAL ai-brain
+  ```
 
 ## Harness: chat with agents (work in progress, local)
 

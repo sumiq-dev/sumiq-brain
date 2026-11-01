@@ -361,3 +361,13 @@ def test_http_api_flow(vault, tmp_path, monkeypatch):
         assert client.delete(f"/api/threads/{tid}", headers=h).json() == {"ok": True}
     finally:
         api.close()
+
+
+def test_package_includes_subpackages():
+    """The installed package (e.g. in Docker) must contain aibrain.harness, not just aibrain."""
+    import tomllib
+    from pathlib import Path
+    from setuptools import find_packages
+    root = Path(__file__).resolve().parents[1]
+    cfg = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["setuptools"]["packages"]["find"]
+    assert "aibrain.harness" in find_packages(str(root), include=cfg["include"])

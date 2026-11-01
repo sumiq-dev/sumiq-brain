@@ -17,8 +17,8 @@ dev = ["pytest>=8", "httpx>=0.27", "anthropic>=2.3", "openai>=3.40", "fastapi>=0
 [project.scripts]
 brain = "aibrain.cli:main"
 
-[tool.setuptools]
-packages = ["aibrain"]
+[tool.setuptools.packages.find]
+include = ["aibrain*"]
 
 [tool.setuptools.package-data]
 aibrain = ["conventions.md"]

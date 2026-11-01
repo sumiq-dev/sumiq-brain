@@ -6,9 +6,11 @@ import asyncio
 import hmac
 import json
 import os
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .runtime import Runtime
@@ -26,8 +28,33 @@ class Decision(BaseModel):
     approved: bool
 
 
-def create_app(runtime: Runtime, token: str | None = None) -> FastAPI:
-    app = FastAPI(title="AI Brain harness", docs_url=None, redoc_url=None)
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
+
+
+def default_web_dir() -> Path | None:
+    env = os.environ.get("BRAIN_WEB_DIR")
+    candidates = [Path(env)] if env else [Path(__file__).resolve().parents[2] / "web" / "out"]
+    return next((p for p in candidates if (p / "index.html").is_file()), None)
+
+
+def create_app(runtime: Runtime, token: str | None = None, web_dir: Path | None = None) -> FastAPI:
+    app = FastAPI(title="AI Brain harness", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        for k, v in SECURITY_HEADERS.items():
+            response.headers.setdefault(k, v)
+        return response
 
     def auth(request: Request) -> None:
         if token is None:
@@ -126,13 +153,21 @@ def create_app(runtime: Runtime, token: str | None = None) -> FastAPI:
             raise HTTPException(404, "no such pending approval")
         return {"ok": True}
 
+    if web_dir is not None:  # the web UI: a static export, served last so /api wins
+        app.mount("/", StaticFiles(directory=web_dir, html=True), name="web")
     return app
+
+
+def harness_token() -> str | None:
+    return os.environ.get("BRAIN_HARNESS_TOKEN") or os.environ.get("BRAIN_TOKEN") or None
 
 
 def serve(runtime: Runtime, host: str = "127.0.0.1", port: int = 8780) -> None:
     import uvicorn
 
-    token = os.environ.get("BRAIN_HARNESS_TOKEN") or None
+    token = harness_token()
     if token is None and host not in ("127.0.0.1", "localhost", "::1"):
         raise SystemExit("refusing to serve the harness on a non-loopback address without BRAIN_HARNESS_TOKEN")
-    uvicorn.run(create_app(runtime, token), host=host, port=port, log_level="warning")
+    web = default_web_dir()
+    uvicorn.run(create_app(runtime, token, web), host=host, port=port, log_level="warning",
+                server_header=False)

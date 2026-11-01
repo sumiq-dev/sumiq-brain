@@ -8,8 +8,10 @@ if [ "$(id -u)" = "0" ]; then
   PGID="${PGID:-1000}"
   [ "$(id -g brain)" = "$PGID" ] || groupmod -o -g "$PGID" brain
   [ "$(id -u brain)" = "$PUID" ] || usermod -o -u "$PUID" brain
-  mkdir -p /vault /config /home/brain
-  [ "$(stat -c %u /vault)" = "$PUID" ] || chown "$PUID:$PGID" /vault
+  mkdir -p /vault /config /home/brain /workspaces
+  for dir in /vault /workspaces; do  # top level only: these can be huge
+    [ "$(stat -c %u "$dir")" = "$PUID" ] || chown "$PUID:$PGID" "$dir"
+  done
   # Small folders: repair fully, e.g. after a `docker compose exec` that ran as root.
   chown -R "$PUID:$PGID" /config /home/brain
   exec setpriv --reuid="$PUID" --regid="$PGID" --init-groups "$0" "$@"

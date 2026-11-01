@@ -3,13 +3,19 @@ services:
     build: .
     image: ai-brain
     restart: unless-stopped
+    # Starts as root only to match the host user (PUID/PGID), then drops to an unprivileged user.
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, SETUID, SETGID, DAC_OVERRIDE]
     ports:
-      - "${BRAIN_PORT:-8765}:8765"
+      - "${BRAIN_PORT:-8765}:8765"                      # MCP for remote clients (token required)
+      - "127.0.0.1:${HARNESS_PORT:-3000}:8780"          # web UI + harness API, this machine only
     environment:
       BRAIN_TOKEN: ${BRAIN_TOKEN:?set BRAIN_TOKEN in .env}
       BRAIN_NAME: ${BRAIN_NAME:-brain}
       BRAIN_WATCH: ${BRAIN_WATCH:-true}                    # librarian files new inbox documents automatically
       BRAIN_WATCH_INTERVAL: ${BRAIN_WATCH_INTERVAL:-10}    # seconds between inbox checks
+      BRAIN_HARNESS: ${BRAIN_HARNESS:-true}                # web UI for chatting with agents
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       # Optional credentials; use whichever providers you configured in data/config/config.yaml.
@@ -19,7 +25,8 @@ services:
     volumes:
       - ./data/vault:/vault          # the brain itself: plain files, open it in Obsidian
       - ./data/config:/config        # platform settings (providers, agent models)
-      - ./data/home:/home/brain      # CLI sign-ins (Claude Code, Codex) survive restarts
+      - ./data/home:/home/brain      # CLI sign-ins and chat history survive restarts
+      - ./data/workspaces:/workspaces  # project folders agents may work on (see recipes)
 
   # Open-weight models. Start with: docker compose --profile local up -d
   ollama:

@@ -7,3 +7,6 @@ docs
 *.egg-info
 .pytest_cache
 .env
+web/node_modules
+web/.next
+web/out
