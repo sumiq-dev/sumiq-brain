@@ -220,8 +220,12 @@ class _HtmlText(HTMLParser):
             self.parts.append(data)
 
 
-def _html(path: Path) -> str:
+def html_to_text(html: str) -> str:
     parser = _HtmlText()
-    parser.feed(_read_text(path))
+    parser.feed(html)
     lines = (re.sub(r"[ \t]+", " ", line).strip() for line in "".join(parser.parts).splitlines())
-    return "\n".join(lines)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def _html(path: Path) -> str:
+    return html_to_text(_read_text(path))

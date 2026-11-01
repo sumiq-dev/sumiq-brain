@@ -366,7 +366,27 @@ Agent roles so far: `navigator` (read-only tools, answers questions), `worker` (
 - **Heavy work:** bulk extraction (OCR, transcription) and local models need real CPU/GPU, so for those, host the container on a capable machine.
 - **Readers elsewhere:** the vault can be synced to other devices (Syncthing, git, Obsidian Sync) for reading in Obsidian. Only one brain service should write to a vault at a time.
 
-## 12. Roadmap
+## 12. Harness
+
+The harness is where you chat with agents. It's a FastAPI backend (`brain harness`) and a terminal client (`brain chat`); a Next.js web UI follows.
+
+- **Recipes** are saved agent setups: instructions, provider/model, tools (`files`, `shell`, `web`), workspace folders, a shell allowlist, and write approval. YAML files live in `<config dir>/recipes/`, and `standard` is built in. **Every agent has full brain access.** Recipes only govern access outside the brain.
+- **Toolbox:** one tool system for all model routes.
+  - **Brain tools:** all of them.
+  - **File tools:** limited to the workspaces. Symlinks can't escape, and secret files are refused.
+  - **`run_command`:** runs in a workspace with secret env vars removed. Each command needs approval unless it's on the allowlist, and an allowlisted command that chains, redirects or substitutes needs approval anyway.
+  - **`web_fetch`:** blocks private and loopback addresses, including after redirects.
+  - **`web_search`:** comes from Anthropic's server tool for the Claude API, from Claude Code's built-in tool for the subscription route, and from SearXNG (`web.searxng_url` in the settings) for other models.
+- **Approvals:** a risky call blocks until the user decides in the UI or terminal (15-minute timeout, then denied).
+- **Chat engines** stream one turn each and keep the provider's conversation state append-only, so prompt caching keeps working:
+  - **Claude API:** our own loop, caching the system prompt, tools and the growing conversation, plus server-side refusal fallback.
+  - **OpenAI-compatible:** our own loop.
+  - **Claude subscription:** one Claude Code session per thread, resumed every turn. Built-in tools are off except web search and fetch. The toolbox is reached through a short-lived loopback MCP endpoint, so approvals work the same way.
+- **System prompt:** frozen per thread. It contains the brain map, the agent's capabilities, the recipe instructions and the date.
+- **Storage:** threads and items (user, assistant, tool_call, tool_result, usage) in SQLite (`~/.local/share/ai-brain/harness/harness.db`), outside the vault. Saving a conversation into the brain is phase 3.
+- **API:** threads, messages, an SSE event stream per run (replayable via `Last-Event-ID`), cancel, and approvals. It binds to 127.0.0.1 and requires `BRAIN_HARNESS_TOKEN` on any other address.
+
+## 13. Roadmap
 
 | Stage | Deliverable | Done when |
 | --- | --- | --- |
@@ -376,9 +396,9 @@ Agent roles so far: `navigator` (read-only tools, answers questions), `worker` (
 | 3 | Navigator with fan-out + miss log + conversation saving (§8.4) | Answers to a test set of questions land on the right notes in ≤ 6 reads |
 | 4 | Gardener | A messy vault converges: no oversized indexes, orphans or broken links |
 | 5 | Bulk import with cost estimates and resume | 10k+ file import runs unattended and survives restarts |
-| 6 | Agent platform (Next.js UI + Python backend) | Chat agents use the brain as their memory |
+| 6 | Harness: backend + terminal chat (done), web UI, saving conversations to the brain, Codex chat | Chat agents use the brain as their memory |
 
-## 13. Decisions
+## 14. Decisions
 
 | Date | Decision |
 | --- | --- |
@@ -390,7 +410,7 @@ Agent roles so far: `navigator` (read-only tools, answers questions), `worker` (
 | 2026-11-01 | Subscriptions only through the official vendor CLIs, never by handling their tokens (§9). |
 | 2026-11-01 | The whole platform ships as one Docker image that can be hosted anywhere (§11). |
 
-## 14. Open questions
+## 15. Open questions
 
 - **Images and video:** describe them with a vision model at ingest (costly), or store with filename and metadata only?
 - **Multiple vaults:** one brain, or separate vaults (work/personal) with optional cross-links?

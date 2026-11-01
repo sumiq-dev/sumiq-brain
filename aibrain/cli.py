@@ -75,6 +75,22 @@ def main(argv: list[str] | None = None) -> int:
         if name == "watch":
             p.add_argument("--interval", type=float, default=float(os.environ.get("BRAIN_WATCH_INTERVAL", "10")))
 
+    p = sub.add_parser("chat", help="chat with an agent in the terminal (keeps the conversation)")
+    p.add_argument("message")
+    p.add_argument("--vault", type=Path, default=default_vault, required=default_vault is None)
+    p.add_argument("--config", type=Path, help="settings file (default: $BRAIN_CONFIG)")
+    p.add_argument("--recipe", default="standard", help="agent recipe for a new conversation")
+    p.add_argument("--thread", help="continue this conversation (id)")
+    p.add_argument("--yes", action="store_true", help="approve every action without asking (careful)")
+
+    p = sub.add_parser("harness", help="run the harness API for the web UI")
+    p.add_argument("--vault", type=Path, default=default_vault, required=default_vault is None)
+    p.add_argument("--config", type=Path, help="settings file (default: $BRAIN_CONFIG)")
+    p.add_argument("--host", default=os.environ.get("BRAIN_HARNESS_HOST", "127.0.0.1"))
+    p.add_argument("--port", type=int, default=int(os.environ.get("BRAIN_HARNESS_PORT", "8780")))
+
+    sub.add_parser("recipe-example", help="print an example agent recipe")
+
     sub.add_parser("config-template", help="print a starter settings file")
 
     p = sub.add_parser("check", help="report convention problems")
@@ -139,6 +155,20 @@ def main(argv: list[str] | None = None) -> int:
             if not outcomes:
                 print("nothing to file")
             return 1 if any(o.status in ("failed", "incomplete") for o in outcomes) else 0
+
+        elif args.command in ("chat", "harness"):
+            from .harness.cli import run_chat, runtime_for
+            runtime = runtime_for(Vault(args.vault), Settings.load(args.config))
+            if args.command == "harness":
+                from .harness.server import serve
+                print(f"harness API on http://{args.host}:{args.port}", file=sys.stderr)
+                serve(runtime, args.host, args.port)
+                return 0
+            return run_chat(runtime, args.message, args.recipe, args.thread, args.yes)
+
+        elif args.command == "recipe-example":
+            from .harness.recipes import EXAMPLE
+            print(EXAMPLE, end="")
 
         elif args.command == "config-template":
             print(TEMPLATE, end="")

@@ -64,11 +64,7 @@ class McpServer:
         if method == "ping":
             return {}
         if method == "tools/list":
-            return {"tools": [
-                {"name": t.name, "description": t.description, "inputSchema": t.schema,
-                 "annotations": {"readOnlyHint": not t.writes, "destructiveHint": False}}
-                for t in (TOOLS[n] for n in self.tools)
-            ]}
+            return {"tools": self.list_tools()}
         if method == "tools/call":
             return self._call_tool(params)
         if method.startswith("notifications/"):
@@ -88,17 +84,31 @@ class McpServer:
             "instructions": INSTRUCTIONS,
         }
 
+    def list_tools(self) -> list[dict]:
+        """Tools offered to the client. Subclasses can expose a different tool set."""
+        return [{"name": t.name, "description": t.description, "inputSchema": t.schema,
+                 "annotations": {"readOnlyHint": not t.writes, "destructiveHint": False}}
+                for t in (TOOLS[n] for n in self.tools)]
+
+    def has_tool(self, name: str) -> bool:
+        return name in self.tools
+
+    def run_tool(self, name: str, args: dict) -> tuple[str, bool]:
+        """Execute a tool; returns (text, is_error)."""
+        try:
+            return call(self.vault, name, args, self.ctx), False
+        except VaultError as e:
+            return str(e), True
+
     def _call_tool(self, params: dict) -> dict:
         name = params.get("name")
-        if name not in self.tools:
+        if not self.has_tool(name):
             raise _InvalidParams(f"unknown tool: {name}")
         args = params.get("arguments") or {}
         if not isinstance(args, dict):
             raise _InvalidParams("arguments must be an object")
         try:
-            text, is_error = call(self.vault, name, args, self.ctx), False
-        except VaultError as e:
-            text, is_error = str(e), True
+            text, is_error = self.run_tool(name, args)
         except Exception as e:  # report, don't crash the server
             traceback.print_exc(file=sys.stderr)
             text, is_error = f"internal error: {type(e).__name__}: {e}", True

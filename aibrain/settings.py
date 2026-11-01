@@ -95,6 +95,7 @@ class Settings:
     providers: dict[str, Provider]
     agents: dict[str, dict]
     path: Path | None = None
+    extras: dict = field(default_factory=dict)  # other top-level sections, e.g. web
 
     @staticmethod
     def default_path() -> Path:
@@ -121,7 +122,8 @@ class Settings:
         for role, spec in agents.items():
             if spec.get("provider") and spec["provider"] not in providers:
                 raise SettingsError(f"agent '{role}' uses unknown provider '{spec['provider']}'")
-        return cls(providers, agents, path)
+        extras = {k: v for k, v in data.items() if k not in ("providers", "agents")}
+        return cls(providers, agents, path, extras)
 
     def agent(self, role: str, provider: str | None = None, model: str | None = None) -> AgentSpec:
         """Resolve the spec for an agent role; explicit provider/model override the settings."""

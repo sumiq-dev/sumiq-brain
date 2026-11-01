@@ -81,6 +81,25 @@ docker compose exec -u brain brain brain run "File everything in the inbox" --pr
 `ask` uses a read-only agent; `run` uses an agent that may change the brain. `--provider` and `--model`
 override the settings for one call.
 
+## Harness: chat with agents (work in progress, local)
+
+Agents that use the brain as memory and, if their recipe allows, work on files, run commands and
+use the web. Every agent has full access to the brain.
+
+```bash
+brain chat "What's the hard pity in my game?"                 # standard agent
+brain chat "And who's our art lead?" --thread <id>            # continue a conversation
+brain chat "Fix the failing test" --recipe coder              # use an agent recipe
+brain harness                                                 # HTTP API for the web UI (127.0.0.1:8780)
+brain recipe-example > ~/.config/ai-brain/recipes/coder.yaml  # create a recipe
+```
+
+A recipe is a saved setup: instructions, model, which tools (files/shell/web), which project folders.
+File tools can't leave the recipe's folders or read secrets. Writes and shell commands need your
+approval, except commands you put on the recipe's allowlist. Shell commands run as your user, so
+approve them with care. Conversations are stored in `~/.local/share/ai-brain/harness/`, separately
+from the brain. The chat model comes from the `chat` agent entry in the settings (or `default`).
+
 ## Without Docker
 
 ```bash
